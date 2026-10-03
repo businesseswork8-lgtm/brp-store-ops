@@ -45,11 +45,23 @@ export default function UserAndStaffManagementPage() {
 
   // Staff Member Add Form
   const [isAddingStaff, setIsAddingStaff] = useState(false);
-  const [newStaff, setNewStaff] = useState({ name: '', store_id: '' });
+  const [newStaff, setNewStaff] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    store_id: '',
+    create_login: false,
+    password: '',
+  });
 
   // Staff Member Edit Mode
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
-  const [editStaffForm, setEditStaffForm] = useState<{ name: string; store_id: string }>({ name: '', store_id: '' });
+  const [editStaffForm, setEditStaffForm] = useState<{ name: string; email: string; phone: string; store_id: string }>({
+    name: '',
+    email: '',
+    phone: '',
+    store_id: '',
+  });
 
   // User Profile Add Form
   const [isAddingUser, setIsAddingUser] = useState(false);
@@ -99,16 +111,63 @@ export default function UserAndStaffManagementPage() {
     e.preventDefault();
     if (!newStaff.name || !newStaff.store_id) return;
 
+    let profileId: string | null = null;
+
+    // Optional Login Account Creation
+    if (newStaff.create_login) {
+      if (!newStaff.email || !newStaff.password) {
+        alert('Please enter both Email and Password to create a login account for this staff member.');
+        return;
+      }
+
+      // 1. Create Auth Account
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: newStaff.email.trim(),
+        password: newStaff.password,
+        options: {
+          data: {
+            full_name: newStaff.name.trim(),
+          },
+        },
+      });
+
+      if (authErr || !authData.user) {
+        alert('Error creating staff login credentials: ' + (authErr?.message || 'Authentication error'));
+        return;
+      }
+
+      profileId = authData.user.id;
+
+      // 2. Create User Profile
+      const { error: profileErr } = await supabase.from('profiles').upsert({
+        id: profileId,
+        email: newStaff.email.trim(),
+        full_name: newStaff.name.trim(),
+        role: 'store',
+        store_access: [newStaff.store_id],
+        is_active: true,
+      });
+
+      if (profileErr) {
+        console.error('Profile creation error:', profileErr);
+      }
+    }
+
+    // 3. Create Staff Record
     const { error } = await supabase.from('staff_members').insert({
       name: newStaff.name.trim(),
+      email: newStaff.email ? newStaff.email.trim() : null,
+      phone: newStaff.phone ? newStaff.phone.trim() : null,
       store_id: newStaff.store_id,
+      profile_id: profileId,
       is_active: true,
     });
 
     if (!error) {
       setIsAddingStaff(false);
-      setNewStaff({ name: '', store_id: stores[0]?.id || '' });
+      setNewStaff({ name: '', email: '', phone: '', store_id: stores[0]?.id || '', create_login: false, password: '' });
       fetchData();
+      alert(`Staff member ${newStaff.name} created successfully! ${newStaff.create_login ? 'Login account registered.' : ''}`);
     } else {
       alert('Error adding staff member: ' + error.message);
     }
@@ -128,6 +187,8 @@ export default function UserAndStaffManagementPage() {
       .from('staff_members')
       .update({
         name: editStaffForm.name.trim(),
+        email: editStaffForm.email ? editStaffForm.email.trim() : null,
+        phone: editStaffForm.phone ? editStaffForm.phone.trim() : null,
         store_id: editStaffForm.store_id,
       })
       .eq('id', staffId);
@@ -179,7 +240,7 @@ export default function UserAndStaffManagementPage() {
       setIsAddingUser(false);
       setNewUser({ full_name: '', email: '', password: '', role: 'store', store_access: [] });
       fetchData();
-      alert(`User ${newUser.email} registered successfully!`);
+      alert(`User account ${newUser.email} registered successfully!`);
     } else {
       alert('Profile error: ' + profileErr.message);
     }
@@ -216,7 +277,8 @@ export default function UserAndStaffManagementPage() {
   }
 
   const filteredStaff = staffList.filter(s => {
-    const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
+                          ((s as any).email || '').toLowerCase().includes(search.toLowerCase());
     const matchesStore = selectedStoreFilter === 'all' || s.store_id === selectedStoreFilter;
     return matchesSearch && matchesStore;
   });
@@ -233,7 +295,7 @@ export default function UserAndStaffManagementPage() {
         <div>
           <h1 className={styles.title}>User & Store Staff Management Console</h1>
           <p style={{ color: 'var(--text-secondary)' }}>
-            Manage store-level staff members for daily shift logs, system login accounts, and store permissions
+            Manage store staff roster, system login accounts, email credentials, and store access permissions
           </p>
         </div>
         <div>
@@ -292,7 +354,7 @@ export default function UserAndStaffManagementPage() {
               <h3 style={{ margin: '0 0 1rem 0' }}>Add New Store Staff Member</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Staff Name</label>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Staff Full Name *</label>
                   <input
                     type="text"
                     required
@@ -304,7 +366,7 @@ export default function UserAndStaffManagementPage() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assigned Store</label>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Assigned Store *</label>
                   <select
                     value={newStaff.store_id}
                     onChange={e => setNewStaff({ ...newStaff, store_id: e.target.value })}
@@ -315,10 +377,70 @@ export default function UserAndStaffManagementPage() {
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Email Address (for login)</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. rahul@99pancakes.com"
+                    value={newStaff.email}
+                    onChange={e => {
+                      const emailVal = e.target.value;
+                      setNewStaff({
+                        ...newStaff,
+                        email: emailVal,
+                        create_login: emailVal.length > 0 ? true : newStaff.create_login,
+                      });
+                    }}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Phone Number</label>
+                  <input
+                    type="tel"
+                    placeholder="+91 9876543210"
+                    value={newStaff.phone}
+                    onChange={e => setNewStaff({ ...newStaff, phone: e.target.value })}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                  />
+                </div>
               </div>
 
-              <button type="submit" className={styles.primaryButton} style={{ marginTop: '1rem' }}>
-                Save Staff Member
+              {/* Login Account Options */}
+              <div style={{ marginTop: '1.25rem', padding: '1rem', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-color)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={newStaff.create_login}
+                    onChange={e => setNewStaff({ ...newStaff, create_login: e.target.checked })}
+                  />
+                  🔐 Enable System Login Account for this Staff Member
+                </label>
+                <p style={{ margin: '0.25rem 0 0.75rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Allows the staff member to log into the application using their email address and password.
+                </p>
+
+                {newStaff.create_login && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginTop: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Initial Login Password *</label>
+                      <input
+                        type="password"
+                        required={newStaff.create_login}
+                        placeholder="Min 6 characters (e.g. Staff123!)"
+                        value={newStaff.password}
+                        onChange={e => setNewStaff({ ...newStaff, password: e.target.value })}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button type="submit" className={styles.primaryButton} style={{ marginTop: '1.25rem' }}>
+                Save Staff Member {newStaff.create_login ? '& Create Login' : ''}
               </button>
             </form>
           )}
@@ -327,7 +449,7 @@ export default function UserAndStaffManagementPage() {
           <div className={styles.filterBar} style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <input
               type="text"
-              placeholder="Search staff members by name..."
+              placeholder="Search staff by name or email..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className={styles.searchInput}
@@ -355,6 +477,8 @@ export default function UserAndStaffManagementPage() {
                   <tr>
                     <th>Staff Name</th>
                     <th>Assigned Store</th>
+                    <th>Email & Contact</th>
+                    <th>System Login</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -362,12 +486,12 @@ export default function UserAndStaffManagementPage() {
                 <tbody>
                   {filteredStaff.length === 0 ? (
                     <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
                         No staff members found. Click "+ Add Store Staff Member" to add store workers.
                       </td>
                     </tr>
                   ) : (
-                    filteredStaff.map(staff => (
+                    filteredStaff.map((staff: any) => (
                       <tr key={staff.id}>
                         <td style={{ fontWeight: 600 }}>
                           {editingStaffId === staff.id ? (
@@ -397,6 +521,42 @@ export default function UserAndStaffManagementPage() {
                           )}
                         </td>
                         <td>
+                          {editingStaffId === staff.id ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                              <input
+                                type="email"
+                                placeholder="Email"
+                                value={editStaffForm.email}
+                                onChange={e => setEditStaffForm({ ...editStaffForm, email: e.target.value })}
+                                style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                              />
+                              <input
+                                type="tel"
+                                placeholder="Phone"
+                                value={editStaffForm.phone}
+                                onChange={e => setEditStaffForm({ ...editStaffForm, phone: e.target.value })}
+                                style={{ padding: '0.3rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                              />
+                            </div>
+                          ) : (
+                            <div>
+                              <div>{staff.email || <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No Email</span>}</div>
+                              {staff.phone && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>📱 {staff.phone}</div>}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {staff.profile_id ? (
+                            <span className={styles.roleStore} style={{ fontSize: '0.8rem' }}>
+                              🔐 Login Enabled
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', padding: '0.2rem 0.5rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px' }}>
+                              ⚪ Shift Worker Only
+                            </span>
+                          )}
+                        </td>
+                        <td>
                           <span className={staff.is_active ? styles.roleSuperAdmin : styles.roleStore}>
                             {staff.is_active ? '✓ Active' : 'Inactive'}
                           </span>
@@ -417,7 +577,12 @@ export default function UserAndStaffManagementPage() {
                                 className={styles.btnSecondary}
                                 onClick={() => {
                                   setEditingStaffId(staff.id);
-                                  setEditStaffForm({ name: staff.name, store_id: staff.store_id });
+                                  setEditStaffForm({
+                                    name: staff.name,
+                                    email: staff.email || '',
+                                    phone: staff.phone || '',
+                                    store_id: staff.store_id,
+                                  });
                                 }}
                               >
                                 Edit
@@ -646,3 +811,4 @@ export default function UserAndStaffManagementPage() {
     </div>
   );
 }
+
