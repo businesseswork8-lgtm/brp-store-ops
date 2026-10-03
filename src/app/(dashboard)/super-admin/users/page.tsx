@@ -239,7 +239,7 @@ export default function UserAndStaffManagementPage() {
         <div>
           <h1 className={styles.title}>User & Store Staff Management Console</h1>
           <p style={{ color: 'var(--text-secondary)' }}>
-            Manage store staff roster for shift logging, and register system login accounts for Store Managers, Admins, and Super Admins
+            Manage store staff roster for shift logging, and register system login accounts for Store, Admin, and Super Admin accounts
           </p>
         </div>
         <div>
@@ -501,8 +501,8 @@ export default function UserAndStaffManagementPage() {
                     onChange={e => setNewUser({ ...newUser, role: e.target.value })}
                     style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
                   >
-                    <option value="store">Store Manager / Staff</option>
-                    <option value="admin">Store Admin</option>
+                    <option value="store">Store</option>
+                    <option value="admin">Admin</option>
                     <option value="super_admin">Super Admin</option>
                   </select>
                 </div>
@@ -581,13 +581,13 @@ export default function UserAndStaffManagementPage() {
                               onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })}
                               style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
                             >
-                              <option value="store">Store Staff</option>
+                              <option value="store">Store</option>
                               <option value="admin">Admin</option>
                               <option value="super_admin">Super Admin</option>
                             </select>
                           ) : (
-                            <span className={`${styles.badge} ${user.role === 'super_admin' ? styles.roleSuperAdmin : styles.roleStore}`}>
-                              {user.role?.replace('_', ' ')}
+                            <span className={`${styles.badge} ${user.role === 'super_admin' ? styles.roleSuperAdmin : user.role === 'admin' ? styles.roleAdmin : styles.roleStore}`}>
+                              {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? 'Admin' : 'Store'}
                             </span>
                           )}
                         </td>
