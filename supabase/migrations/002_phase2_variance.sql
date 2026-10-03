@@ -1,16 +1,17 @@
--- Migration 002: Seed Item Categories, Items, Recipes, and Variance RPC Function
+-- Migration 002: Comprehensive Seed for Item Categories, Items, Recipes, and Variance RPC Function
 
--- 1. Seed Item Categories (valid hex UUIDs starting with c)
+-- 1. Seed Item Categories
 INSERT INTO item_categories (id, brand_id, name, sort_order) VALUES
   ('c1111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', 'Batter', 1),
   ('c2222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'Filling', 2),
   ('c3333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Topping', 3),
   ('c4444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', 'Spread', 4),
   ('c5555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', 'Packaging', 5),
-  ('c6666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222', 'Ice Cream', 1)
+  ('c6666666-6666-6666-6666-666666666666', '22222222-2222-2222-2222-222222222222', 'Ice Cream', 1),
+  ('c7777777-7777-7777-7777-777777777777', '22222222-2222-2222-2222-222222222222', 'Sundaes & Cones', 2)
 ON CONFLICT (id) DO NOTHING;
 
--- 2. Seed Tracked Raw Material Items (valid hex UUIDs starting with a)
+-- 2. Seed Tracked Raw Material Items
 INSERT INTO items (id, category_id, name, uom, purchase_unit_name, purchase_unit_qty, is_daily_tracked, is_active) VALUES
   -- 99 Pancakes Items
   ('a0010000-0000-0000-0000-000000000001', 'c1111111-1111-1111-1111-111111111111', 'Miracle Mix Batter', 'grams', 'Kg', 1, true, true),
@@ -52,20 +53,25 @@ INSERT INTO items (id, category_id, name, uom, purchase_unit_name, purchase_unit
   ('a0010000-0000-0000-0000-000000000037', 'c3333333-3333-3333-3333-333333333333', 'Dark Rice Crispy', 'grams', 'Kg', 1, true, true),
   ('a0010000-0000-0000-0000-000000000038', 'c3333333-3333-3333-3333-333333333333', 'Vanilla Frosting', 'grams', 'Kg', 1, true, true),
   
-  -- Baskin Robbins Item
-  ('a0020000-0000-0000-0000-000000000001', 'c6666666-6666-6666-6666-666666666666', 'Ice Cream Base', 'grams', 'Tub', 1, true, true)
+  -- Baskin Robbins Items
+  ('a0020000-0000-0000-0000-000000000001', 'c6666666-6666-6666-6666-666666666666', 'Ice Cream Base', 'grams', 'Tub', 1, true, true),
+  ('a0020000-0000-0000-0000-000000000002', 'c7777777-7777-7777-7777-777777777777', 'Waffle Cone', 'pieces', 'Box', 1, true, true),
+  ('a0020000-0000-0000-0000-000000000003', 'c7777777-7777-7777-7777-777777777777', 'Chocolate Fudge Sauce', 'grams', 'Bottle', 1, true, true)
 ON CONFLICT (id) DO NOTHING;
 
--- 3. Seed Sample Recipes for 99 Pancakes & Baskin Robbins (valid hex UUIDs starting with b)
+-- 3. Seed Sample Recipes for 99 Pancakes & Baskin Robbins
 INSERT INTO recipes (id, brand_id, product_name, product_category) VALUES
   ('b0010000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'Holla Nutella 12pc', 'Holland Pancakes'),
   ('b0010000-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', 'Holla Nutella 6pc', 'Holland Pancakes'),
   ('b0010000-0000-0000-0000-000000000003', '11111111-1111-1111-1111-111111111111', 'Brownie Brittle Pancake 12pc', 'Holland Pancakes'),
   ('b0010000-0000-0000-0000-000000000004', '11111111-1111-1111-1111-111111111111', 'Kitkat Waffle', 'Waffles'),
-  ('b0020000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Single Scoop', 'Scoops')
+  ('b0010000-0000-0000-0000-000000000005', '11111111-1111-1111-1111-111111111111', 'Nutella Forever Crepe', 'French Crepes'),
+  ('b0020000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Single Scoop', 'Scoops'),
+  ('b0020000-0000-0000-0000-000000000002', '22222222-2222-2222-2222-222222222222', 'Double Scoop', 'Scoops'),
+  ('b0020000-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222', 'Family Pack', 'Home Packs')
 ON CONFLICT (id) DO NOTHING;
 
--- 4. Ingredients for Sample Recipes (valid hex UUIDs starting with d0)
+-- 4. Ingredients for Sample Recipes
 INSERT INTO recipe_ingredients (id, recipe_id, item_id, quantity) VALUES
   ('d0010000-0000-0000-0000-000000000001', 'b0010000-0000-0000-0000-000000000001', 'a0010000-0000-0000-0000-000000000001', 110.0), -- Batter
   ('d0010000-0000-0000-0000-000000000002', 'b0010000-0000-0000-0000-000000000001', 'a0010000-0000-0000-0000-000000000005', 50.0),  -- Nutella
@@ -83,7 +89,12 @@ INSERT INTO recipe_ingredients (id, recipe_id, item_id, quantity) VALUES
   ('d0040000-0000-0000-0000-000000000002', 'b0010000-0000-0000-0000-000000000004', 'a0010000-0000-0000-0000-000000000002', 12.5),  -- Dark Chocolate
   ('d0040000-0000-0000-0000-000000000003', 'b0010000-0000-0000-0000-000000000004', 'a0010000-0000-0000-0000-000000000014', 7.5),   -- Kitkat Bites
 
-  ('d0050000-0000-0000-0000-000000000001', 'b0020000-0000-0000-0000-000000000001', 'a0020000-0000-0000-0000-000000000001', 125.0)  -- Ice Cream Base
+  ('d0050000-0000-0000-0000-000000000001', 'b0010000-0000-0000-0000-000000000005', 'a0010000-0000-0000-0000-000000000001', 145.0), -- Batter
+  ('d0050000-0000-0000-0000-000000000002', 'b0010000-0000-0000-0000-000000000005', 'a0010000-0000-0000-0000-000000000005', 45.0),  -- Nutella
+
+  ('d0060000-0000-0000-0000-000000000001', 'b0020000-0000-0000-0000-000000000001', 'a0020000-0000-0000-0000-000000000001', 125.0), -- Ice Cream Base
+  ('d0070000-0000-0000-0000-000000000001', 'b0020000-0000-0000-0000-000000000002', 'a0020000-0000-0000-0000-000000000001', 164.0), -- Ice Cream Base
+  ('d0080000-0000-0000-0000-000000000001', 'b0020000-0000-0000-0000-000000000003', 'a0020000-0000-0000-0000-000000000001', 347.0)  -- Ice Cream Base
 ON CONFLICT (id) DO NOTHING;
 
 -- 5. RPC Function to Calculate Daily Stock Variance

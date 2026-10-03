@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import styles from '../analytics.module.css';
@@ -30,6 +30,13 @@ interface DailySalesSummary {
   other_online_amount: number;
 }
 
+interface SalesItem {
+  id: string;
+  item_name: string;
+  quantity_sold: number;
+  total_price: number;
+}
+
 export default function SalesAnalyticsPage() {
   const supabase = createClient();
 
@@ -40,6 +47,7 @@ export default function SalesAnalyticsPage() {
   );
   
   const [salesData, setSalesData] = useState<DailySalesSummary[]>([]);
+  const [topItems, setTopItems] = useState<SalesItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -77,12 +85,29 @@ export default function SalesAnalyticsPage() {
       const { data, error } = await query;
       if (!error && data) {
         setSalesData(data as any);
+
+        // Fetch top selling itemized products if summary exists
+        if (data.length > 0) {
+          const summaryIds = data.map(d => d.id);
+          const { data: itemData } = await supabase
+            .from('daily_sales_items')
+            .select('id, item_name, quantity_sold, total_price')
+            .in('sales_summary_id', summaryIds)
+            .order('quantity_sold', { ascending: false })
+            .limit(10);
+
+          if (itemData) setTopItems(itemData);
+        } else {
+          setTopItems([]);
+        }
       } else {
         setSalesData([]);
+        setTopItems([]);
       }
     } catch (error) {
       console.error('Error fetching sales data:', error);
       setSalesData([]);
+      setTopItems([]);
     } finally {
       setLoading(false);
     }
@@ -103,14 +128,19 @@ export default function SalesAnalyticsPage() {
   const totalSwiggy = salesData.reduce((acc, curr) => acc + (curr.swiggy_amount || 0), 0);
   const totalZomato = salesData.reduce((acc, curr) => acc + (curr.zomato_amount || 0), 0);
   const totalCash = salesData.reduce((acc, curr) => acc + (curr.cash_amount || 0), 0);
+  const grandChannelTotal = totalSwiggy + totalZomato + totalCash || 1;
+
+  const swiggyPct = Math.round((totalSwiggy / grandChannelTotal) * 100);
+  const zomatoPct = Math.round((totalZomato / grandChannelTotal) * 100);
+  const cashPct = Math.round((totalCash / grandChannelTotal) * 100);
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Sales Analytics & Revenue Audit</h1>
+          <h1 className={styles.title}>Sales Revenue & Channel Analytics</h1>
           <p className={styles.subtitle}>
-            Monitor store sales, channel revenue splits (Swiggy, Zomato, Walk-In Cash), and discounts
+            Executive sales performance, order counts, and channel revenue splits (Swiggy vs Zomato vs Walk-In Cash)
           </p>
         </div>
         <Link href="/store/sales-upload" className={styles.primaryButton}>
@@ -122,7 +152,7 @@ export default function SalesAnalyticsPage() {
       <div className={styles.filterBar} style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '200px' }}>
           <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-            Store
+            Store Filter
           </label>
           <select
             value={selectedStore}
@@ -141,7 +171,7 @@ export default function SalesAnalyticsPage() {
 
         <div style={{ flex: 1, minWidth: '180px' }}>
           <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-            Report Date
+            Audit Date
           </label>
           <input
             type="date"
@@ -153,8 +183,8 @@ export default function SalesAnalyticsPage() {
         </div>
       </div>
 
-      {/* Summary KPI Cards */}
-      <div className={styles.statsGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+      {/* KPI Cards */}
+      <div className={styles.statsGrid} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         <div className={styles.statCard}>
           <div className={styles.statTitle}>Total Net Revenue</div>
           <div className={styles.statValue} style={{ color: 'var(--success)' }}>
@@ -163,7 +193,7 @@ export default function SalesAnalyticsPage() {
         </div>
 
         <div className={styles.statCard}>
-          <div className={styles.statTitle}>Gross Sales</div>
+          <div className={styles.statTitle}>Gross Revenue</div>
           <div className={styles.statValue}>
             {formatCurrency(totalGross)}
           </div>
@@ -198,6 +228,63 @@ export default function SalesAnalyticsPage() {
         </div>
       </div>
 
+      {/* Visual Channel Distribution Progress Bar */}
+      <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+        <h3 style={{ margin: '0 0 0.75rem 0' }}>Channel Revenue Share Split</h3>
+        
+        <div style={{ display: 'flex', height: '24px', borderRadius: '12px', overflow: 'hidden', background: 'var(--bg-secondary)', marginBottom: '1rem' }}>
+          <div style={{ width: `${swiggyPct}%`, background: '#fc8019', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
+            {swiggyPct > 5 ? `${swiggyPct}%` : ''}
+          </div>
+          <div style={{ width: `${zomatoPct}%`, background: '#cb202d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
+            {zomatoPct > 5 ? `${zomatoPct}%` : ''}
+          </div>
+          <div style={{ width: `${cashPct}%`, background: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
+            {cashPct > 5 ? `${cashPct}%` : ''}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', fontSize: '0.9rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#fc8019', display: 'inline-block' }}></span>
+            <span>Swiggy: <strong>{formatCurrency(totalSwiggy)} ({swiggyPct}%)</strong></span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#cb202d', display: 'inline-block' }}></span>
+            <span>Zomato: <strong>{formatCurrency(totalZomato)} ({zomatoPct}%)</strong></span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }}></span>
+            <span>Walk-In Cash: <strong>{formatCurrency(totalCash)} ({cashPct}%)</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Selling Itemized Products */}
+      {topItems.length > 0 && (
+        <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>Top Selling POS Items</h3>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>POS Product Name</th>
+                <th>Units Sold</th>
+                <th>Total Sales Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topItems.map((item, idx) => (
+                <tr key={idx}>
+                  <td style={{ fontWeight: 600 }}>{item.item_name}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{item.quantity_sold} pcs</td>
+                  <td>{formatCurrency(item.total_price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Sales Summary Data Table */}
       {loading ? (
         <div className={styles.card} style={{ textAlign: 'center', padding: '3rem' }}>
@@ -205,6 +292,7 @@ export default function SalesAnalyticsPage() {
         </div>
       ) : (
         <div className={styles.card}>
+          <h3>Daily Sales Reports ({selectedDate})</h3>
           <table className={styles.table} style={{ width: '100%' }}>
             <thead>
               <tr>
@@ -216,17 +304,17 @@ export default function SalesAnalyticsPage() {
                 <th>Swiggy</th>
                 <th>Zomato</th>
                 <th>Walk-In Cash</th>
-                <th>Orders</th>
+                <th>Total Orders</th>
               </tr>
             </thead>
             <tbody>
               {salesData.length === 0 ? (
                 <tr>
                   <td colSpan={9} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
-                    No sales reports found for the selected store/date.
+                    No sales reports uploaded for this date.
                     <br />
                     <Link href="/store/sales-upload" style={{ color: 'var(--accent-primary)', marginTop: '0.5rem', display: 'inline-block' }}>
-                      Click here to upload Rista POS report
+                      Click here to upload Rista POS CSV report
                     </Link>
                   </td>
                 </tr>
