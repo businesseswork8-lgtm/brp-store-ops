@@ -308,19 +308,19 @@ ALTER TABLE variance_thresholds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE monthly_audit_entries ENABLE ROW LEVEL SECURITY;
 
 -- Helper functions for policies
-CREATE OR REPLACE FUNCTION auth.is_super_admin() RETURNS BOOLEAN AS $$
+CREATE OR REPLACE FUNCTION public.is_super_admin() RETURNS BOOLEAN AS $$
   SELECT EXISTS (
     SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'super_admin'
   );
 $$ LANGUAGE sql SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION auth.is_admin() RETURNS BOOLEAN AS $$
+CREATE OR REPLACE FUNCTION public.is_admin() RETURNS BOOLEAN AS $$
   SELECT EXISTS (
     SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
   );
 $$ LANGUAGE sql SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION auth.has_store_access(check_store_id UUID) RETURNS BOOLEAN AS $$
+CREATE OR REPLACE FUNCTION public.has_store_access(check_store_id UUID) RETURNS BOOLEAN AS $$
   SELECT EXISTS (
     SELECT 1 FROM profiles WHERE id = auth.uid() AND check_store_id = ANY(store_access)
   );
@@ -329,76 +329,76 @@ $$ LANGUAGE sql SECURITY DEFINER;
 -- Profiles Policies
 CREATE POLICY "Users can view their own profile" ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can update their own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Super admin has full access to profiles" ON profiles FOR ALL USING (auth.is_super_admin());
-CREATE POLICY "Admins can read all profiles" ON profiles FOR SELECT USING (auth.is_admin());
+CREATE POLICY "Super admin has full access to profiles" ON profiles FOR ALL USING (public.is_super_admin());
+CREATE POLICY "Admins can read all profiles" ON profiles FOR SELECT USING (public.is_admin());
 
 -- Brands Policies (Public read for authenticated, super_admin write)
 CREATE POLICY "Brands are viewable by all authenticated users" ON brands FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Super admin can modify brands" ON brands FOR ALL USING (auth.is_super_admin());
+CREATE POLICY "Super admin can modify brands" ON brands FOR ALL USING (public.is_super_admin());
 
 -- Stores Policies
-CREATE POLICY "Users can view stores they have access to" ON stores FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(id));
-CREATE POLICY "Super admin can modify stores" ON stores FOR ALL USING (auth.is_super_admin());
+CREATE POLICY "Users can view stores they have access to" ON stores FOR SELECT USING (public.is_super_admin() OR public.has_store_access(id));
+CREATE POLICY "Super admin can modify stores" ON stores FOR ALL USING (public.is_super_admin());
 
 -- General Shared Tables (Item Categories, Items, Recipes, etc. - viewable by those with any store access or admin/superadmin)
 CREATE POLICY "Item categories viewable by authenticated users" ON item_categories FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Super admin modify item categories" ON item_categories FOR ALL USING (auth.is_super_admin());
+CREATE POLICY "Super admin modify item categories" ON item_categories FOR ALL USING (public.is_super_admin());
 
 CREATE POLICY "Items viewable by authenticated users" ON items FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Super admin modify items" ON items FOR ALL USING (auth.is_super_admin());
+CREATE POLICY "Super admin modify items" ON items FOR ALL USING (public.is_super_admin());
 
 CREATE POLICY "Recipes viewable by authenticated users" ON recipes FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Super admin modify recipes" ON recipes FOR ALL USING (auth.is_super_admin());
+CREATE POLICY "Super admin modify recipes" ON recipes FOR ALL USING (public.is_super_admin());
 
 CREATE POLICY "Recipe ingredients viewable by authenticated users" ON recipe_ingredients FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Super admin modify recipe ingredients" ON recipe_ingredients FOR ALL USING (auth.is_super_admin());
+CREATE POLICY "Super admin modify recipe ingredients" ON recipe_ingredients FOR ALL USING (public.is_super_admin());
 
 -- Store specific data policies (Staff, Daily Stock, Wastage, Sales, etc.)
 -- staff_members
-CREATE POLICY "View staff for accessed stores" ON staff_members FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage staff for accessed stores" ON staff_members FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View staff for accessed stores" ON staff_members FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage staff for accessed stores" ON staff_members FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- daily_stock_entries
-CREATE POLICY "View stock entries for accessed stores" ON daily_stock_entries FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage stock entries for accessed stores" ON daily_stock_entries FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View stock entries for accessed stores" ON daily_stock_entries FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage stock entries for accessed stores" ON daily_stock_entries FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- daily_wastage_log
-CREATE POLICY "View wastage log for accessed stores" ON daily_wastage_log FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage wastage log for accessed stores" ON daily_wastage_log FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View wastage log for accessed stores" ON daily_wastage_log FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage wastage log for accessed stores" ON daily_wastage_log FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- daily_tasting_log
-CREATE POLICY "View tasting log for accessed stores" ON daily_tasting_log FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage tasting log for accessed stores" ON daily_tasting_log FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View tasting log for accessed stores" ON daily_tasting_log FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage tasting log for accessed stores" ON daily_tasting_log FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- daily_cash_tally
-CREATE POLICY "View cash tally for accessed stores" ON daily_cash_tally FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage cash tally for accessed stores" ON daily_cash_tally FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View cash tally for accessed stores" ON daily_cash_tally FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage cash tally for accessed stores" ON daily_cash_tally FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- daily_sales_summary
-CREATE POLICY "View sales summary for accessed stores" ON daily_sales_summary FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage sales summary for accessed stores" ON daily_sales_summary FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View sales summary for accessed stores" ON daily_sales_summary FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage sales summary for accessed stores" ON daily_sales_summary FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- daily_sales_items
 CREATE POLICY "View sales items for accessed stores" ON daily_sales_items FOR SELECT USING (
-    auth.is_super_admin() OR 
-    EXISTS (SELECT 1 FROM daily_sales_summary dss WHERE dss.id = sales_summary_id AND auth.has_store_access(dss.store_id))
+    public.is_super_admin() OR 
+    EXISTS (SELECT 1 FROM daily_sales_summary dss WHERE dss.id = sales_summary_id AND public.has_store_access(dss.store_id))
 );
 CREATE POLICY "Manage sales items for accessed stores" ON daily_sales_items FOR ALL USING (
-    auth.is_super_admin() OR 
-    EXISTS (SELECT 1 FROM daily_sales_summary dss WHERE dss.id = sales_summary_id AND auth.has_store_access(dss.store_id))
+    public.is_super_admin() OR 
+    EXISTS (SELECT 1 FROM daily_sales_summary dss WHERE dss.id = sales_summary_id AND public.has_store_access(dss.store_id))
 );
 
 -- purchase_orders
-CREATE POLICY "View purchase orders for accessed stores" ON purchase_orders FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage purchase orders for accessed stores" ON purchase_orders FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View purchase orders for accessed stores" ON purchase_orders FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage purchase orders for accessed stores" ON purchase_orders FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- variance_thresholds
 CREATE POLICY "View variance thresholds" ON variance_thresholds FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Manage variance thresholds" ON variance_thresholds FOR ALL USING (auth.is_super_admin() OR auth.is_admin());
+CREATE POLICY "Manage variance thresholds" ON variance_thresholds FOR ALL USING (public.is_super_admin() OR public.is_admin());
 
 -- monthly_audit_entries
-CREATE POLICY "View monthly audits for accessed stores" ON monthly_audit_entries FOR SELECT USING (auth.is_super_admin() OR auth.has_store_access(store_id));
-CREATE POLICY "Manage monthly audits for accessed stores" ON monthly_audit_entries FOR ALL USING (auth.is_super_admin() OR auth.has_store_access(store_id));
+CREATE POLICY "View monthly audits for accessed stores" ON monthly_audit_entries FOR SELECT USING (public.is_super_admin() OR public.has_store_access(store_id));
+CREATE POLICY "Manage monthly audits for accessed stores" ON monthly_audit_entries FOR ALL USING (public.is_super_admin() OR public.has_store_access(store_id));
 
 -- ==========================================
 -- 5. Seed Data
