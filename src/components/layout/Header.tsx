@@ -8,7 +8,7 @@ import styles from './Header.module.css';
 interface Store {
   id: string;
   name: string;
-  store_code: string;
+  code: string;
 }
 
 export function Header() {
@@ -26,12 +26,13 @@ export function Header() {
       
       if (data && data.length > 0) {
         setStores(data);
-        const saved = localStorage.getItem('selectedStore');
+        const saved = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
         if (saved && data.find(s => s.id === saved)) {
           setSelectedStore(saved);
         } else {
           setSelectedStore(data[0].id);
           localStorage.setItem('selectedStore', data[0].id);
+          localStorage.setItem('brp_selected_store', data[0].id);
         }
       }
     };
@@ -42,6 +43,7 @@ export function Header() {
     const value = e.target.value;
     setSelectedStore(value);
     localStorage.setItem('selectedStore', value);
+    localStorage.setItem('brp_selected_store', value);
     window.dispatchEvent(new Event('storeChange'));
   };
 
@@ -78,7 +80,7 @@ export function Header() {
           >
             {stores.map(store => (
               <option key={store.id} value={store.id}>
-                {store.name} ({store.store_code})
+                {store.name} ({store.code})
               </option>
             ))}
           </select>

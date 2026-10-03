@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx'
 
 export interface ParsedPOSReport {
+  isSummaryReport: boolean
   summary: {
     gross_sales: number
     net_sales: number
@@ -21,6 +22,11 @@ export interface ParsedPOSReport {
     total_price: number
     category?: string
   }>
+  categories?: Array<{
+    category_name: string
+    amount: number
+    quantity: number
+  }>
 }
 
 export function parseRistaPOSFile(fileContent: string | ArrayBuffer): ParsedPOSReport {
@@ -34,9 +40,10 @@ export function parseRistaPOSFile(fileContent: string | ArrayBuffer): ParsedPOSR
 
   const sheetName = workbook.SheetNames[0]
   const sheet = workbook.Sheets[sheetName]
-  const data = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, any>[]
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][]
 
   const result: ParsedPOSReport = {
+    isSummaryReport: false,
     summary: {
       gross_sales: 0,
       net_sales: 0,
@@ -51,17 +58,96 @@ export function parseRistaPOSFile(fileContent: string | ArrayBuffer): ParsedPOSR
       other_online_amount: 0,
     },
     items: [],
+    categories: [],
   }
 
-  // Define possible header aliases
-  const itemAliases = ['item name', 'product', 'item', 'item description']
-  const qtyAliases = ['qty', 'quantity', 'quantity sold', 'qty sold']
-  const amountAliases = ['amount', 'total', 'net amount', 'total amount', 'net sales']
-  const categoryAliases = ['category', 'item category']
+  if (!rows || rows.length === 0) return result
+
+  // Check Mode 1: Rista POS "Sales Summary / Sales Summary by Hour" Report
+  const firstColTitle = String(rows[1]?.[0] || rows[0]?.[0] || '').trim()
   
-  // Try to find the header row by looking for item and qty
-  for (let i = 0; i < data.length; i++) {
-    const row = data[i]
+  if (firstColTitle === 'Description' || firstColTitle.toLowerCase().includes('branches:')) {
+    result.isSummaryReport = true
+    let inChannelSection = false
+    let inCategorySection = false
+    let inCategoryQtySection = false
+
+    const categoryMap = new Map<string, { amount: number; quantity: number }>()
+
+    for (let i = 0; i < rows.length; i++) {
+      const desc = String(rows[i]?.[0] || '').trim()
+      const totalVal = parseFloat(rows[i]?.[1]) || 0
+
+      if (!desc) continue
+
+      if (desc === 'Channel Summary') {
+        inChannelSection = true
+        inCategorySection = false
+        inCategoryQtySection = false
+      } else if (desc === 'Category Summary') {
+        inCategorySection = true
+        inChannelSection = false
+        inCategoryQtySection = false
+      } else if (desc.includes('Category Summary (Sale Item Quantity)')) {
+        inCategoryQtySection = true
+        inCategorySection = false
+        inChannelSection = false
+      }
+
+      if (!inChannelSection && !inCategorySection && !inCategoryQtySection) {
+        if (desc.startsWith('Gross Sales')) {
+          result.summary.gross_sales = totalVal
+        } else if (desc === 'Net Sales') {
+          result.summary.net_sales = totalVal
+        } else if (desc === 'Discounts') {
+          result.summary.total_discount = Math.abs(totalVal)
+        } else if (desc === 'Taxes') {
+          result.summary.total_tax = totalVal
+        } else if (desc.includes('No. of Transactions')) {
+          if (result.summary.total_orders === 0) result.summary.total_orders = Math.round(totalVal)
+        }
+      } else if (inChannelSection) {
+        if (desc.includes('Swiggy')) {
+          if (i + 1 < rows.length && String(rows[i+1]?.[0] || '').trim().includes('Net Sales')) {
+            result.summary.swiggy_amount = parseFloat(rows[i+1]?.[1]) || 0
+          }
+        } else if (desc.includes('Zomato')) {
+          if (i + 1 < rows.length && String(rows[i+1]?.[0] || '').trim().includes('Net Sales')) {
+            result.summary.zomato_amount = parseFloat(rows[i+1]?.[1]) || 0
+          }
+        } else if (desc.includes('Walk In')) {
+          if (i + 1 < rows.length && String(rows[i+1]?.[0] || '').trim().includes('Net Sales')) {
+            result.summary.cash_amount = parseFloat(rows[i+1]?.[1]) || 0
+          }
+        }
+      } else if (inCategorySection && desc !== 'Category Summary') {
+        categoryMap.set(desc, { amount: totalVal, quantity: 0 })
+      } else if (inCategoryQtySection && !desc.includes('Category Summary')) {
+        if (categoryMap.has(desc)) {
+          categoryMap.get(desc)!.quantity = Math.round(totalVal)
+        }
+      }
+    }
+
+    result.categories = Array.from(categoryMap.entries()).map(([name, data]) => ({
+      category_name: name,
+      amount: data.amount,
+      quantity: data.quantity,
+    }))
+
+    return result
+  }
+
+  // Check Mode 2: Standard Itemized Sales CSV Report
+  const jsonRows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, any>[]
+
+  const itemAliases = ['item name', 'product', 'item', 'item description', 'product name']
+  const qtyAliases = ['qty', 'quantity', 'quantity sold', 'qty sold', 'count']
+  const amountAliases = ['amount', 'total', 'net amount', 'total amount', 'net sales', 'price']
+  const categoryAliases = ['category', 'item category', 'product category']
+
+  for (let i = 0; i < jsonRows.length; i++) {
+    const row = jsonRows[i]
     let itemName = ''
     let qty = 0
     let amount = 0
@@ -69,14 +155,14 @@ export function parseRistaPOSFile(fileContent: string | ArrayBuffer): ParsedPOSR
 
     const keys = Object.keys(row)
     let hasItem = false
-    
+
     keys.forEach((key) => {
       const lowerKey = key.toLowerCase().trim()
       const val = row[key]
-      
-      if (itemAliases.some((alias) => lowerKey.includes(alias))) {
+
+      if (itemAliases.some((alias) => lowerKey === alias || lowerKey.includes(alias))) {
         itemName = String(val).trim()
-        hasItem = true
+        if (itemName) hasItem = true
       } else if (qtyAliases.some((alias) => lowerKey === alias)) {
         qty = parseFloat(String(val)) || 0
       } else if (amountAliases.some((alias) => lowerKey === alias)) {
@@ -84,29 +170,6 @@ export function parseRistaPOSFile(fileContent: string | ArrayBuffer): ParsedPOSR
       } else if (categoryAliases.some((alias) => lowerKey.includes(alias))) {
         category = String(val).trim()
       }
-      
-      // Attempt to parse payment summaries if they exist in column headers or values
-      if (lowerKey.includes('gross') && lowerKey.includes('sales')) {
-        result.summary.gross_sales += parseFloat(String(val)) || 0
-      }
-      if (lowerKey.includes('net') && lowerKey.includes('sales')) {
-        result.summary.net_sales += parseFloat(String(val)) || 0
-      }
-      if (lowerKey.includes('discount')) {
-        result.summary.total_discount += parseFloat(String(val)) || 0
-      }
-      if (lowerKey.includes('tax')) {
-        result.summary.total_tax += parseFloat(String(val)) || 0
-      }
-      if (lowerKey.includes('order') && lowerKey.includes('count')) {
-        result.summary.total_orders += parseFloat(String(val)) || 0
-      }
-      if (lowerKey === 'cash') result.summary.cash_amount += parseFloat(String(val)) || 0
-      if (lowerKey === 'upi') result.summary.upi_amount += parseFloat(String(val)) || 0
-      if (lowerKey === 'card') result.summary.card_amount += parseFloat(String(val)) || 0
-      if (lowerKey === 'swiggy') result.summary.swiggy_amount += parseFloat(String(val)) || 0
-      if (lowerKey === 'zomato') result.summary.zomato_amount += parseFloat(String(val)) || 0
-      if (lowerKey.includes('other online')) result.summary.other_online_amount += parseFloat(String(val)) || 0
     })
 
     if (hasItem && itemName && qty > 0) {
@@ -117,16 +180,11 @@ export function parseRistaPOSFile(fileContent: string | ArrayBuffer): ParsedPOSR
         total_price: amount,
         category: category || undefined,
       })
-      
-      // If summary is not provided explicitly, sum up from items
-      if (result.summary.net_sales === 0) {
-        result.summary.net_sales += amount
-      }
+
+      result.summary.net_sales += amount
+      result.summary.gross_sales += amount
+      result.summary.total_orders += 1
     }
-  }
-  
-  if (result.summary.gross_sales === 0) {
-    result.summary.gross_sales = result.summary.net_sales
   }
 
   return result

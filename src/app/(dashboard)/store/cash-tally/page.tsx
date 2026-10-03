@@ -28,11 +28,19 @@ export default function CashTallyPage() {
 
   useEffect(() => {
     const init = async () => {
-      const storedStoreId = localStorage.getItem('brp_selected_store');
+      let storedStoreId = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
+      if (!storedStoreId) {
+        const { data: stores } = await supabase.from('stores').select('id').order('name');
+        if (stores && stores.length > 0) {
+          storedStoreId = stores[0].id;
+        }
+      }
       if (!storedStoreId) {
         setLoading(false);
         return;
       }
+      localStorage.setItem('selectedStore', storedStoreId);
+      localStorage.setItem('brp_selected_store', storedStoreId);
       setStoreId(storedStoreId);
 
       try {
