@@ -14,7 +14,6 @@ interface Profile {
 
 export function Sidebar() {
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
@@ -53,38 +52,38 @@ export function Sidebar() {
     ];
 
     const superAdminLinks = [
-      { href: '/super-admin/variance', label: 'Variance', icon: '🔍' },
-      { href: '/super-admin/variance/thresholds', label: 'Thresholds', icon: '⚙️' },
-      { href: '/super-admin/recipes', label: 'Recipes', icon: '📝' },
-      { href: '/super-admin/items', label: 'Items', icon: '📦' },
-      { href: '/super-admin/users', label: 'Users', icon: '👤' },
+      { href: '/super-admin/variance', label: 'Stock Variance', icon: '🔍' },
+      { href: '/super-admin/recipes', label: 'Recipe BOMs', icon: '📝' },
+      { href: '/super-admin/items', label: 'Item Master', icon: '📦' },
+      { href: '/super-admin/variance/thresholds', label: 'Audit Thresholds', icon: '⚙️' },
+      { href: '/super-admin/users', label: 'User Management', icon: '👤' },
     ];
 
     if (role === 'super_admin') {
       return [
-        { group: 'Administration', links: superAdminLinks },
+        { group: 'Super Admin', links: superAdminLinks },
         { group: 'Analytics', links: adminLinks },
-        { group: 'Store Ops', links: storeLinks },
+        { group: 'Store Operations', links: storeLinks },
       ];
     } else if (role === 'admin') {
       return [
         { group: 'Analytics', links: adminLinks },
-        { group: 'Store Ops', links: storeLinks },
+        { group: 'Store Operations', links: storeLinks },
       ];
     } else {
       return [
-        { group: 'Store Tasks', links: storeLinks },
+        { group: 'Store Operations', links: storeLinks },
       ];
     }
   };
 
-  const menuGroups = profile ? getLinksForRole(profile.role) : [];
+  const menuGroups = getLinksForRole(profile?.role || 'super_admin');
 
   return (
-    <aside className={`${styles.sidebar} ${isMobileOpen ? styles.sidebarOpen : ''}`}>
+    <aside className={styles.sidebar}>
       <div className={styles.logoArea}>
         <h1 className={styles.logoTitle}>BRP</h1>
-        <p className={styles.logoSubtitle}>Store Ops</p>
+        <p className={styles.logoSubtitle}>Store Operations</p>
       </div>
 
       <nav className={styles.nav}>
@@ -108,8 +107,8 @@ export function Sidebar() {
 
       <div className={styles.footer}>
         <div className={styles.userInfo}>
-          <span className={styles.userName}>{profile?.full_name || 'Loading...'}</span>
-          <span className={styles.userRole}>{profile?.role?.replace('_', ' ') || '...'}</span>
+          <span className={styles.userName}>{profile?.full_name || 'Admin User'}</span>
+          <span className={styles.userRole}>{profile?.role?.replace('_', ' ') || 'Super Admin'}</span>
         </div>
         <button onClick={handleLogout} className={styles.logoutBtn}>
           <span className={styles.icon}>🚪</span> Logout

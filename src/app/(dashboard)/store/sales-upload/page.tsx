@@ -5,14 +5,13 @@ import { parseRistaPOSFile, ParsedPOSReport } from '@/lib/services/rista-parser'
 import { createClient } from '@/lib/supabase/client';
 import styles from './page.module.css';
 
-type Store = { id: string; name: string; code: string };
 type StaffMember = { id: string; name: string };
+type Store = { id: string; name: string; code: string };
 
 export default function SalesUploadPage() {
   const supabase = createClient();
 
-  const [stores, setStores] = useState<Store[]>([]);
-  const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+  const [activeStore, setActiveStore] = useState<Store | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
@@ -27,60 +26,51 @@ export default function SalesUploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchStores();
+    loadStoreAndStaff();
 
     const handleStoreChange = () => {
-      const stored = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
-      if (stored) setSelectedStoreId(stored);
+      loadStoreAndStaff();
     };
 
     window.addEventListener('storeChange', handleStoreChange);
     return () => window.removeEventListener('storeChange', handleStoreChange);
   }, []);
 
-  useEffect(() => {
-    if (selectedStoreId) {
-      fetchStaff(selectedStoreId);
-    }
-  }, [selectedStoreId]);
-
-  async function fetchStores() {
-    const { data } = await supabase.from('stores').select('id, name, code').order('name');
-    if (data && data.length > 0) {
-      setStores(data);
-      const stored = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
-      if (stored && data.some(s => s.id === stored)) {
-        setSelectedStoreId(stored);
-      } else {
-        setSelectedStoreId(data[0].id);
-        localStorage.setItem('selectedStore', data[0].id);
-        localStorage.setItem('brp_selected_store', data[0].id);
+  async function loadStoreAndStaff() {
+    let storeId = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
+    
+    if (!storeId) {
+      const { data: stores } = await supabase.from('stores').select('id, name, code').order('name');
+      if (stores && stores.length > 0) {
+        storeId = stores[0].id;
       }
     }
-  }
 
-  async function fetchStaff(storeId: string) {
-    const { data } = await supabase
-      .from('staff_members')
-      .select('id, name')
-      .eq('store_id', storeId)
-      .eq('is_active', true);
+    if (storeId) {
+      localStorage.setItem('selectedStore', storeId);
+      localStorage.setItem('brp_selected_store', storeId);
 
-    if (data && data.length > 0) {
-      setStaffMembers(data);
-      setSelectedStaffId(data[0].id);
-    } else {
-      setStaffMembers([]);
-      setSelectedStaffId('');
+      const { data: storeData } = await supabase
+        .from('stores')
+        .select('id, name, code')
+        .eq('id', storeId)
+        .single();
+      if (storeData) setActiveStore(storeData);
+
+      const { data: staffData } = await supabase
+        .from('staff_members')
+        .select('id, name')
+        .eq('store_id', storeId)
+        .eq('is_active', true);
+
+      if (staffData && staffData.length > 0) {
+        setStaffMembers(staffData);
+        setSelectedStaffId(staffData[0].id);
+      } else {
+        setStaffMembers([]);
+        setSelectedStaffId('');
+      }
     }
-  }
-
-  function handleStoreSelect(e: React.ChangeEvent<HTMLSelectElement>) {
-    const val = e.target.value;
-    setSelectedStoreId(val);
-    localStorage.setItem('selectedStore', val);
-    localStorage.setItem('brp_selected_store', val);
-    window.dispatchEvent(new Event('storeChange'));
   }
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,13 +100,13 @@ export default function SalesUploadPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedStoreId) {
-      setMessage({ type: 'error', text: 'Please select a store before submitting.' });
+    if (!activeStore) {
+      setMessage({ type: 'error', text: 'No active store selected. Please select a store in the header.' });
       return;
     }
 
     if (!report) {
-      setMessage({ type: 'error', text: 'Please upload a valid Rista POS report file.' });
+      setMessage({ type: 'error', text: 'Please select a valid Rista POS report CSV file.' });
       return;
     }
 
@@ -124,11 +114,9 @@ export default function SalesUploadPage() {
     setMessage({ type: '', text: '' });
 
     try {
-      // Get current logged-in user profile ID
       const { data: { user } } = await supabase.auth.getUser();
-      
-      // If user profile is not logged in, fall back to first profile or null
       let profileId = user?.id;
+
       if (!profileId) {
         const { data: profs } = await supabase.from('profiles').select('id').limit(1);
         if (profs && profs.length > 0) profileId = profs[0].id;
@@ -138,9 +126,8 @@ export default function SalesUploadPage() {
         throw new Error('User session not found. Please re-login.');
       }
 
-      // Upsert summary data into daily_sales_summary
       const summaryPayload = {
-        store_id: selectedStoreId,
+        store_id: activeStore.id,
         entry_date: selectedDate,
         gross_sales: report.summary.gross_sales,
         net_sales: report.summary.net_sales,
@@ -165,9 +152,7 @@ export default function SalesUploadPage() {
 
       if (summaryErr) throw summaryErr;
 
-      // Insert itemized sales items if available in report
       if (report.items.length > 0 && summaryData) {
-        // Delete previous items for this summary
         await supabase.from('daily_sales_items').delete().eq('sales_summary_id', summaryData.id);
 
         const itemsToInsert = report.items.map(i => ({
@@ -179,16 +164,14 @@ export default function SalesUploadPage() {
           category: i.category || null,
         }));
 
-        const { error: itemsErr } = await supabase.from('daily_sales_items').insert(itemsToInsert);
-        if (itemsErr) console.warn('Itemized items insert warning:', itemsErr);
+        await supabase.from('daily_sales_items').insert(itemsToInsert);
       }
 
       setMessage({
         type: 'success',
-        text: `✅ POS Sales Report for ${selectedDate} uploaded & saved successfully!`,
+        text: `✅ POS Sales Report for ${activeStore.name} (${selectedDate}) saved successfully!`,
       });
 
-      // Clear report
       setReport(null);
       setFileName('');
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -206,34 +189,22 @@ export default function SalesUploadPage() {
         <div>
           <h1 className={styles.title}>Rista POS Sales Report Upload</h1>
           <p className={styles.subtitle}>
-            Upload daily Rista POS CSV export to parse gross sales, channel splits, and itemized sales
+            Upload daily Rista POS CSV export for {activeStore ? activeStore.name : 'Selected Store'}
           </p>
         </div>
         <a href="/store" style={{ padding: '0.6rem 1.2rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-          ← Back to Operations
+          ← Back to Daily Operations
         </a>
       </header>
 
-      {/* Control Bar: Store, Date & Staff Selection */}
+      {/* Control Bar: Active Store Info & Date */}
       <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'center' }}>
           <div>
-            <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-              Select Store
-            </label>
-            <select
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-              value={selectedStoreId}
-              onChange={handleStoreSelect}
-            >
-              {stores.length === 0 ? (
-                <option value="">Loading stores...</option>
-              ) : (
-                stores.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                ))
-              )}
-            </select>
+            <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Target Store</span>
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--accent-primary)', marginTop: '0.2rem' }}>
+              🏬 {activeStore ? activeStore.name : 'Loading...'}
+            </div>
           </div>
 
           <div>
@@ -248,21 +219,22 @@ export default function SalesUploadPage() {
             />
           </div>
 
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-              Submitted By Staff (Optional)
-            </label>
-            <select
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-              value={selectedStaffId}
-              onChange={e => setSelectedStaffId(e.target.value)}
-            >
-              <option value="">Store Manager / General Staff</option>
-              {staffMembers.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
+          {staffMembers.length > 0 && (
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                Submitted By Staff (Optional)
+              </label>
+              <select
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                value={selectedStaffId}
+                onChange={e => setSelectedStaffId(e.target.value)}
+              >
+                {staffMembers.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -283,7 +255,7 @@ export default function SalesUploadPage() {
             {fileName ? `Selected File: ${fileName}` : 'Click to Browse or Drag Rista POS CSV File'}
           </h3>
           <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.9rem' }}>
-            Supports Rista POS Sales Summary by Hour, Category Summary, and Itemized Sales Export files (.csv, .xlsx)
+            Supports Rista POS Sales Summary by Hour and Itemized Sales Export files (.csv, .xlsx)
           </p>
         </label>
       </div>
@@ -349,7 +321,7 @@ export default function SalesUploadPage() {
             </div>
 
             {/* Channel Splits */}
-            <h4 style={{ margin: '1.5rem 0 0.5rem 0', color: 'var(--text-primary)' }}>Channel Breakdown</h4>
+            <h4 style={{ margin: '1.5rem 0 0.5rem 0', color: 'var(--text-primary)' }}>Channel Revenue Breakdown</h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
               <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>🛵 Swiggy Sales</div>
@@ -383,7 +355,7 @@ export default function SalesUploadPage() {
                   <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
                     <th style={{ padding: '0.5rem' }}>Category</th>
                     <th style={{ padding: '0.5rem' }}>Sales Amount</th>
-                    <th style={{ padding: '0.5rem' }}>Item Quantity Sold</th>
+                    <th style={{ padding: '0.5rem' }}>Quantity Sold</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -400,7 +372,7 @@ export default function SalesUploadPage() {
           )}
 
           {/* Confirm & Save Button */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
               style={{
                 padding: '0.85rem 2rem',
