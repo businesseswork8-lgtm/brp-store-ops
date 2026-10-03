@@ -8,7 +8,8 @@ type Brand = { id: string; name: string };
 type Item = { id: string; name: string; uom: string };
 
 type RecipeIngredient = {
-  id?: string;
+  id: string;
+  recipe_id: string;
   item_id: string;
   quantity: number;
   items?: { name: string; uom: string };
@@ -45,6 +46,12 @@ export default function RecipesPage() {
     { item_id: '', quantity: 0 },
   ]);
 
+  // Ingredient Add form for an expanded recipe
+  const [addIngredientMap, setAddIngredientMap] = useState<Record<string, { item_id: string; quantity: number }>>({});
+
+  // Editing state for ingredient quantities per recipe
+  const [editingQuantities, setEditingQuantities] = useState<Record<string, number>>({});
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -72,7 +79,17 @@ export default function RecipesPage() {
       .select('*, brands(name), recipe_ingredients(*, items(name, uom))')
       .order('product_name');
 
-    if (rData) setRecipes(rData as any);
+    if (rData) {
+      setRecipes(rData as any);
+      // Initialize edit state map for quantities
+      const qMap: Record<string, number> = {};
+      (rData as any).forEach((r: Recipe) => {
+        r.recipe_ingredients?.forEach(ing => {
+          qMap[ing.id] = ing.quantity;
+        });
+      });
+      setEditingQuantities(qMap);
+    }
     setLoading(false);
   }
 
@@ -122,6 +139,55 @@ export default function RecipesPage() {
     fetchData();
   }
 
+  async function handleSaveIngredientQuantity(ingredientId: string) {
+    const newQty = editingQuantities[ingredientId];
+    if (newQty === undefined || newQty < 0) return;
+
+    const { error } = await supabase
+      .from('recipe_ingredients')
+      .update({ quantity: newQty })
+      .eq('id', ingredientId);
+
+    if (!error) {
+      fetchData();
+    } else {
+      alert('Error updating ingredient grammage: ' + error.message);
+    }
+  }
+
+  async function handleAddSingleIngredient(recipeId: string) {
+    const ingData = addIngredientMap[recipeId];
+    if (!ingData || !ingData.item_id || ingData.quantity <= 0) {
+      alert('Please select an item and enter a valid quantity');
+      return;
+    }
+
+    const { error } = await supabase.from('recipe_ingredients').insert({
+      recipe_id: recipeId,
+      item_id: ingData.item_id,
+      quantity: ingData.quantity,
+    });
+
+    if (!error) {
+      setAddIngredientMap(prev => ({ ...prev, [recipeId]: { item_id: items[0]?.id || '', quantity: 0 } }));
+      fetchData();
+    } else {
+      alert('Error adding ingredient: ' + error.message);
+    }
+  }
+
+  async function handleDeleteIngredient(ingredientId: string) {
+    if (!confirm('Remove this ingredient from the recipe?')) return;
+    const { error } = await supabase.from('recipe_ingredients').delete().eq('id', ingredientId);
+    if (!error) fetchData();
+  }
+
+  async function handleDeleteRecipe(recipeId: string, productName: string) {
+    if (!confirm(`Are you sure you want to delete recipe "${productName}"?`)) return;
+    const { error } = await supabase.from('recipes').delete().eq('id', recipeId);
+    if (!error) fetchData();
+  }
+
   const filteredRecipes = recipes.filter(r => {
     const matchesSearch = r.product_name.toLowerCase().includes(search.toLowerCase());
     const matchesBrand = selectedBrand === 'all' || r.brand_id === selectedBrand;
@@ -133,7 +199,7 @@ export default function RecipesPage() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Recipe & Bill of Materials (BOM) Builder</h1>
-          <p className={styles.subtitle}>Define exact ingredient consumption per POS product for accurate stock variance tracking</p>
+          <p className={styles.subtitle}>Define, edit, and manage exact raw material grammage per POS item for accurate stock variance audits</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           <a href="/super-admin/items" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
@@ -202,7 +268,7 @@ export default function RecipesPage() {
               <input
                 type="number"
                 step="0.01"
-                placeholder="Qty"
+                placeholder="Qty (g / ml / pcs)"
                 style={{ flex: 1 }}
                 value={row.quantity || ''}
                 onChange={e => {
@@ -223,7 +289,7 @@ export default function RecipesPage() {
 
           <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
             <button type="button" className={styles.secondaryButton} onClick={handleAddIngredientRow}>
-              + Add Ingredient
+              + Add Ingredient Row
             </button>
             <button type="submit" className={styles.primaryButton}>
               Save Recipe
@@ -267,6 +333,8 @@ export default function RecipesPage() {
           ) : (
             filteredRecipes.map(recipe => {
               const isExpanded = expandedId === recipe.id;
+              const addState = addIngredientMap[recipe.id] || { item_id: items[0]?.id || '', quantity: 0 };
+
               return (
                 <div key={recipe.id} className={styles.card}>
                   <div
@@ -284,12 +352,22 @@ export default function RecipesPage() {
                         {recipe.brands?.name || 'Brand'} &bull; {recipe.product_category || 'General'}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                         {recipe.recipe_ingredients?.length || 0} ingredients
                       </span>
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDeleteRecipe(recipe.id, recipe.product_name);
+                        }}
+                        style={{ color: 'var(--danger)' }}
+                      >
+                        Delete
+                      </button>
                       <button className={styles.secondaryButton}>
-                        {isExpanded ? 'Collapse ▲' : 'View Ingredients ▼'}
+                        {isExpanded ? 'Collapse ▲' : 'Edit Grammage / BOM ▼'}
                       </button>
                     </div>
                   </div>
@@ -300,28 +378,130 @@ export default function RecipesPage() {
                         <thead>
                           <tr>
                             <th>Raw Material / Ingredient</th>
-                            <th>Consumption Quantity</th>
+                            <th style={{ width: '180px' }}>Consumption Quantity</th>
                             <th>Unit (UOM)</th>
+                            <th style={{ width: '150px' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
                           {recipe.recipe_ingredients && recipe.recipe_ingredients.length > 0 ? (
-                            recipe.recipe_ingredients.map((ing, idx) => (
-                              <tr key={idx}>
-                                <td>{ing.items?.name || 'Unknown Item'}</td>
-                                <td style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>{ing.quantity}</td>
+                            recipe.recipe_ingredients.map(ing => (
+                              <tr key={ing.id}>
+                                <td style={{ fontWeight: 600 }}>{ing.items?.name || 'Unknown Item'}</td>
+                                <td>
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    value={editingQuantities[ing.id] ?? ing.quantity}
+                                    onChange={e => {
+                                      const val = parseFloat(e.target.value) || 0;
+                                      setEditingQuantities(prev => ({ ...prev, [ing.id]: val }));
+                                    }}
+                                    style={{
+                                      width: '100px',
+                                      padding: '0.4rem 0.6rem',
+                                      borderRadius: '6px',
+                                      background: 'var(--bg-secondary)',
+                                      border: '1px solid var(--border-color)',
+                                      color: 'var(--accent-primary)',
+                                      fontWeight: 700,
+                                    }}
+                                  />
+                                </td>
                                 <td>{ing.items?.uom || 'grams'}</td>
+                                <td>
+                                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                    <button
+                                      className={styles.secondaryButton}
+                                      onClick={() => handleSaveIngredientQuantity(ing.id)}
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                                    >
+                                      Save Qty
+                                    </button>
+                                    <button
+                                      className={styles.secondaryButton}
+                                      onClick={() => handleDeleteIngredient(ing.id)}
+                                      style={{ padding: '0.3rem 0.6rem', fontSize: '0.8rem', color: 'var(--danger)' }}
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                </td>
                               </tr>
                             ))
                           ) : (
                             <tr>
-                              <td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
-                                No ingredients added to this recipe yet.
+                              <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                No ingredients added to this recipe yet. Use the section below to add ingredients.
                               </td>
                             </tr>
                           )}
                         </tbody>
                       </table>
+
+                      {/* Add new ingredient to existing recipe */}
+                      <div style={{ marginTop: '1.25rem', padding: '1rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                          + Add Raw Material Ingredient to {recipe.product_name}
+                        </h4>
+                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <select
+                            style={{
+                              flex: 2,
+                              minWidth: '200px',
+                              padding: '0.5rem',
+                              borderRadius: '6px',
+                              background: 'var(--bg-secondary)',
+                              border: '1px solid var(--border-color)',
+                              color: 'var(--text-primary)',
+                            }}
+                            value={addState.item_id}
+                            onChange={e =>
+                              setAddIngredientMap(prev => ({
+                                ...prev,
+                                [recipe.id]: { ...addState, item_id: e.target.value },
+                              }))
+                            }
+                          >
+                            {items.map(i => (
+                              <option key={i.id} value={i.id}>
+                                {i.name} ({i.uom})
+                              </option>
+                            ))}
+                          </select>
+
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="Qty (g/ml/pcs)"
+                            style={{
+                              flex: 1,
+                              minWidth: '120px',
+                              padding: '0.5rem',
+                              borderRadius: '6px',
+                              background: 'var(--bg-secondary)',
+                              border: '1px solid var(--border-color)',
+                              color: 'var(--text-primary)',
+                            }}
+                            value={addState.quantity || ''}
+                            onChange={e =>
+                              setAddIngredientMap(prev => ({
+                                ...prev,
+                                [recipe.id]: { ...addState, quantity: parseFloat(e.target.value) || 0 },
+                              }))
+                            }
+                          />
+
+                          <button
+                            type="button"
+                            className={styles.primaryButton}
+                            onClick={() => handleAddSingleIngredient(recipe.id)}
+                            style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                          >
+                            Add to Recipe
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
