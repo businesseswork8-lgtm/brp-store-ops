@@ -49,6 +49,7 @@ export function Sidebar() {
 
     const adminLinks = [
       { href: '/analytics/sales', label: 'Sales Analytics', icon: '📊' },
+      { href: '/analytics/trends', label: 'Revenue Trends', icon: '📈' },
     ];
 
     const superAdminLinks = [

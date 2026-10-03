@@ -152,6 +152,14 @@ export default function StoreDashboardPage() {
       href: '/store/wastage',
       icon: '♻',
     },
+    {
+      id: 'eod-report',
+      title: 'EOD Closing Summary',
+      text: 'Generate End-of-Day PDF report',
+      status: 'optional',
+      href: '/store/eod-report',
+      icon: '🖨️',
+    },
   ];
 
   return (
