@@ -129,6 +129,14 @@ export default function StoreDashboardPage() {
       icon: status.closingStock ? '✓' : '!',
     },
     {
+      id: 'sales-upload',
+      title: 'POS Sales Upload',
+      text: 'Upload daily Rista POS CSV export',
+      status: 'optional',
+      href: '/store/sales-upload',
+      icon: '📊',
+    },
+    {
       id: 'wastage',
       title: 'Wastage Log',
       text: 'Log optional wastage',

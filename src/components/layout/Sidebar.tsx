@@ -44,6 +44,7 @@ export function Sidebar() {
       { href: '/store', label: 'Daily Checklist', icon: '📋' },
       { href: '/store/stock-entry', label: 'Stock Entry', icon: '📦' },
       { href: '/store/cash-tally', label: 'Cash Tally', icon: '💰' },
+      { href: '/store/sales-upload', label: 'POS Sales Upload', icon: '📄' },
       { href: '/store/wastage', label: 'Wastage Log', icon: '🗑️' },
     ];
 
