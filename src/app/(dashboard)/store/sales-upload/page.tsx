@@ -202,13 +202,16 @@ export default function SalesUploadPage() {
 
   return (
     <div className={styles.container}>
-      <header className={styles.header}>
+      <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className={styles.title}>Rista POS Sales Report Upload</h1>
           <p className={styles.subtitle}>
             Upload daily Rista POS CSV export to parse gross sales, channel splits, and itemized sales
           </p>
         </div>
+        <a href="/store" style={{ padding: '0.6rem 1.2rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+          ← Back to Operations
+        </a>
       </header>
 
       {/* Control Bar: Store, Date & Staff Selection */}

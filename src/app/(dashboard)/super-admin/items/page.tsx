@@ -130,17 +130,22 @@ export default function ItemsPage() {
           <h1 className={styles.title}>Item Master Catalog</h1>
           <p className={styles.subtitle}>Manage raw materials, ingredients, and tracked inventory items across stores</p>
         </div>
-        <button
-          className={styles.primaryButton}
-          onClick={() => {
-            setIsAdding(!isAdding);
-            if (!newItem.category_id && categories.length > 0) {
-              setNewItem(prev => ({ ...prev, category_id: categories[0].id }));
-            }
-          }}
-        >
-          {isAdding ? 'Cancel' : '+ Add New Item'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <a href="/super-admin/recipes" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+            📝 Recipe BOM Builder
+          </a>
+          <button
+            className={styles.primaryButton}
+            onClick={() => {
+              setIsAdding(!isAdding);
+              if (!newItem.category_id && categories.length > 0) {
+                setNewItem(prev => ({ ...prev, category_id: categories[0].id }));
+              }
+            }}
+          >
+            {isAdding ? 'Cancel' : '+ Add New Item'}
+          </button>
+        </div>
       </div>
 
       {isAdding && (

@@ -97,9 +97,14 @@ export default function VarianceThresholdsPage() {
           <h1 className={styles.title}>Variance Tolerance Thresholds</h1>
           <p className={styles.subtitle}>Configure acceptable stock variance % triggers for audit alerts</p>
         </div>
-        <button className={styles.primaryButton} onClick={() => setIsAdding(!isAdding)}>
-          {isAdding ? 'Cancel' : '+ Add Custom Rule'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <a href="/super-admin/variance" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+            ← Back to Variance Audit
+          </a>
+          <button className={styles.primaryButton} onClick={() => setIsAdding(!isAdding)}>
+            {isAdding ? 'Cancel' : '+ Add Custom Rule'}
+          </button>
+        </div>
       </div>
 
       {/* Global Default Banner */}

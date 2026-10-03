@@ -135,9 +135,14 @@ export default function RecipesPage() {
           <h1 className={styles.title}>Recipe & Bill of Materials (BOM) Builder</h1>
           <p className={styles.subtitle}>Define exact ingredient consumption per POS product for accurate stock variance tracking</p>
         </div>
-        <button className={styles.primaryButton} onClick={() => setIsAdding(!isAdding)}>
-          {isAdding ? 'Cancel' : '+ Add New Recipe'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <a href="/super-admin/items" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+            📦 Item Catalog
+          </a>
+          <button className={styles.primaryButton} onClick={() => setIsAdding(!isAdding)}>
+            {isAdding ? 'Cancel' : '+ Add New Recipe'}
+          </button>
+        </div>
       </div>
 
       {isAdding && (

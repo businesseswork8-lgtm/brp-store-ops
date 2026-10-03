@@ -250,6 +250,9 @@ export default function VarianceDashboardPage() {
             Compare physical stock logs against POS sales theoretical recipe consumption to detect leakage & wastage
           </p>
         </div>
+        <a href="/super-admin/variance/thresholds" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+          ⚙️ Tolerance Thresholds
+        </a>
       </div>
 
       {/* Control Bar */}
