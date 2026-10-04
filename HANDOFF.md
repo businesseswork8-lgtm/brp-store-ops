@@ -22,7 +22,8 @@ The **BRP Store Operations & Stock Variance Intelligence Platform** is a multi-s
 
 - **Frontend Framework**: Next.js 14 / 16 (App Router, Turbopack, TypeScript).
 - **Styling**: Dark-mode glassmorphic design system (`src/app/globals.css`) with modular component CSS modules (`*.module.css`). Accent color `#ff6b35` (99 Pancakes orange) and `#e91e8c` (Baskin Robbins pink).
-- **Database & Auth**: Supabase PostgreSQL with Row Level Security (RLS) policies and database RPC functions.
+- **Database & Auth**: Live Supabase PostgreSQL instance with Row Level Security (RLS) policies and database RPC functions.
+  > ⚠️ **IMPORTANT FOR OTHER AI SESSIONS**: The Supabase database is ALREADY LIVE and fully seeded with all 30+ recipes, stores, items, and RPC functions. **Do NOT run SQL migrations or reset the database**. All code changes simply use the existing live Supabase connection via environment variables in `.env.local`.
 - **POS Integration**: Client-side Rista POS CSV/XLSX parser (`src/lib/services/rista-parser.ts`) supporting both Hourly Sales export summaries and Itemized Product Sales reports.
 
 ---
@@ -111,5 +112,5 @@ All SQL migration scripts are located in `/supabase/migrations/`:
    ```bash
    npm run build
    ```
-3. **Database Migration**:
-   Run `001_initial_schema.sql`, `002_phase2_variance.sql`, and `003_staff_login_flow.sql` in your Supabase SQL Editor.
+3. **Database Connection**:
+   No database migration or setup is required. All code changes automatically interface with the existing live Supabase backend configured in `.env.local`.
