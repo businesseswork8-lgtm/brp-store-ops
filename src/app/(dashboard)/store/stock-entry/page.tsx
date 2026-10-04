@@ -55,6 +55,7 @@ export default function StockEntryPage() {
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [selectedStaff, setSelectedStaff] = useState('');
   const [search, setSearch] = useState('');
+  const [received, setReceived] = useState<Record<string, number>>({});
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const today = istDate();
@@ -63,7 +64,7 @@ export default function StockEntryPage() {
     if (!store) return;
     setLoading(true);
 
-    const [{ data: staff }, { data: itemRows }, { data: todayRows }, { data: pastRows }] = await Promise.all([
+    const [{ data: staff }, { data: itemRows }, { data: todayRows }, { data: pastRows }, { data: deliveryRows }] = await Promise.all([
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       // Only this store's brand
       supabase.from('items')
@@ -78,7 +79,14 @@ export default function StockEntryPage() {
       supabase.from('daily_stock_entries').select('item_id, closing_stock, closing_containers, entry_date')
         .eq('store_id', store.id).lt('entry_date', today).not('closing_stock', 'is', null)
         .order('entry_date', { ascending: false }).limit(2000),
+      // Deliveries received today
+      supabase.from('purchase_orders').select('item_id, quantity')
+        .eq('store_id', store.id).eq('entry_date', today),
     ]);
+
+    const rec: Record<string, number> = {};
+    (deliveryRows || []).forEach(d => { rec[d.item_id] = (rec[d.item_id] || 0) + Number(d.quantity); });
+    setReceived(rec);
 
     const list = ((itemRows || []) as unknown as Item[])
       .map(i => ({ ...i, tare_grams: Number(i.tare_grams) || 0 }))
@@ -233,7 +241,8 @@ export default function StockEntryPage() {
                 const entry = r?.[mode] ?? { qty: '', tubs: '' };
                 const net = netOf(item, entry);
                 const openingNet = r ? netOf(item, r.opening) : null;
-                const used = mode === 'closing' && openingNet !== null && net !== null ? openingNet - net : null;
+                const got = received[item.id] || 0;
+                const used = mode === 'closing' && openingNet !== null && net !== null ? openingNet + got - net : null;
                 const tub = item.tare_grams > 0;
 
                 return (
@@ -245,6 +254,7 @@ export default function StockEntryPage() {
                     {mode === 'closing' && (
                       <div style={{ color: 'var(--text-secondary)' }}>
                         Opening: {openingNet === null ? '–' : `${openingNet} ${item.uom}`}
+                        {got > 0 && <> · Received: {got} {item.uom}</>}
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -280,7 +290,7 @@ export default function StockEntryPage() {
                     )}
                     {used !== null && (
                       <div style={{ color: used < 0 ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                        Used: {used} {item.uom}{used < 0 ? ' (more than opening — delivery?)' : ''}
+                        Used: {used} {item.uom}{used < 0 ? ' (more than opening + received — check the count or add a delivery)' : ''}
                       </div>
                     )}
                   </div>

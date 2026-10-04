@@ -12,6 +12,7 @@ const TITLES: Record<string, string> = {
   '/store/cash-tally': 'Cash Count',
   '/store/sales-upload': 'Upload Sales Report',
   '/store/wastage': 'Wastage',
+  '/store/deliveries': 'Stock Received',
   '/store/eod-report': 'Day Summary',
   '/super-admin': 'All Stores Today',
   '/super-admin/variance': 'Stock Variance',

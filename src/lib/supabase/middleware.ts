@@ -44,7 +44,7 @@ export async function updateSession(request: NextRequest) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, is_active')
+    .select('role, is_active, can_edit')
     .eq('id', user.id)
     .single()
 
@@ -65,7 +65,8 @@ export async function updateSession(request: NextRequest) {
     profile.role === 'super_admin' ||
     (profile.role === 'admin' && (
       path.startsWith('/analytics') ||
-      path.startsWith('/store') ||
+      // View-only admins may only read the Day Summary in the store area
+      (path.startsWith('/store') && (profile.can_edit || path === '/store/eod-report')) ||
       path === '/super-admin' ||
       path === '/super-admin/variance' ||
       path === '/super-admin/flavours'

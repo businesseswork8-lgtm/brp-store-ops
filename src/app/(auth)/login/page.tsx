@@ -62,7 +62,12 @@ export default function LoginPage() {
         }
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to sign in');
+      const msg = String(err?.message || '');
+      setError(
+        /banned/i.test(msg) ? 'Your login has been turned off. Please contact your manager.'
+        : /invalid login credentials/i.test(msg) ? 'Wrong email or password.'
+        : msg || 'Could not sign in. Please try again.'
+      );
       setLoading(false);
     }
   };

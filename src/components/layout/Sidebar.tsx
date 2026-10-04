@@ -10,6 +10,7 @@ interface Profile {
   id: string;
   role: 'store' | 'admin' | 'super_admin';
   full_name: string | null;
+  can_edit?: boolean;
 }
 
 type NavLink = { href: string; label: string; icon: string };
@@ -18,6 +19,7 @@ const storeLinks: NavLink[] = [
   { href: '/store', label: 'Today', icon: '📋' },
   { href: '/store/cash-tally', label: 'Cash Count', icon: '💰' },
   { href: '/store/stock-entry', label: 'Stock Count', icon: '📦' },
+  { href: '/store/deliveries', label: 'Stock Received', icon: '🚚' },
   { href: '/store/wastage', label: 'Wastage', icon: '🗑️' },
   { href: '/store/sales-upload', label: 'Upload Sales Report', icon: '📄' },
   { href: '/store/eod-report', label: 'Day Summary', icon: '🖨️' },
@@ -43,7 +45,7 @@ const settingsLinks: NavLink[] = [
   { href: '/super-admin/users', label: 'Staff & Logins', icon: '👤' },
 ];
 
-function groupsForRole(role: Profile['role']) {
+function groupsForRole(role: Profile['role'], canEdit: boolean) {
   if (role === 'super_admin') {
     return [
       { group: 'Overview', links: reviewLinks },
@@ -56,7 +58,8 @@ function groupsForRole(role: Profile['role']) {
     return [
       { group: 'Overview', links: reviewLinks },
       { group: 'Sales', links: analyticsLinks },
-      { group: 'Store Work', links: storeLinks },
+      // View-only admins can read the Day Summary but not enter store data
+      { group: 'Store Work', links: canEdit ? storeLinks : storeLinks.filter(l => l.href === '/store/eod-report') },
       { group: 'Settings', links: [flavourLink] },
     ];
   }
@@ -82,7 +85,7 @@ export function Sidebar() {
       if (!user) return;
       const { data } = await supabase
         .from('profiles')
-        .select('id, role, full_name')
+        .select('id, role, full_name, can_edit')
         .eq('id', user.id)
         .single();
       if (data) setProfile(data as Profile);
@@ -107,7 +110,7 @@ export function Sidebar() {
   };
 
   // Show nothing role-specific until we know the role
-  const menuGroups = profile ? groupsForRole(profile.role) : [];
+  const menuGroups = profile ? groupsForRole(profile.role, Boolean(profile.can_edit)) : [];
 
   return (
     <>

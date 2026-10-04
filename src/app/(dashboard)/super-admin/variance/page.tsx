@@ -151,7 +151,7 @@ export default function VarianceDashboardPage() {
       <div className={styles.statGrid}>
         <div className={styles.statCard}>
           <div className={styles.statTitle}>Items checked</div>
-          <div className={styles.statValue}>{varianceData.length}</div>
+          <div className={styles.statValue}>{varianceData.filter(r => r.status !== 'INFO').length}</div>
         </div>
         <div className={styles.statCard}>
           <div className={styles.statTitle}>Items over limit</div>
@@ -190,6 +190,13 @@ export default function VarianceDashboardPage() {
               </span>
             ))}
           </div>
+        </div>
+      )}
+
+      {varianceData.some(r => r.status === 'INFO') && (
+        <div className={styles.card} style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
+          🍨 Ice cream is checked as one total (&quot;All ice cream&quot;) against scoops and packs sold.
+          Each flavour shows how much was used, without an alert, until the sales report tells us which flavour went into each scoop.
         </div>
       )}
 
@@ -243,7 +250,7 @@ export default function VarianceDashboardPage() {
                     </td>
                     <td>{row.wastage}</td>
                     <td
-                      style={{
+                      style={row.status === 'INFO' ? { color: 'var(--text-secondary)' } : {
                         fontWeight: 700,
                         color: Number(row.variance) > 0 ? 'var(--danger)' : Number(row.variance) < 0 ? 'var(--success)' : 'inherit',
                       }}
@@ -251,13 +258,13 @@ export default function VarianceDashboardPage() {
                       {Number(row.variance) > 0 ? `+${row.variance}` : row.variance} {row.uom}
                     </td>
                     <td style={{ fontWeight: 600 }}>
-                      {row.variance_percent === null
+                      {row.status === 'INFO' ? '–' : row.variance_percent === null
                         ? (Number(row.variance) > 0 ? 'No sales to explain' : '–')
                         : Number(row.variance_percent) > 0 ? `+${row.variance_percent}%` : `${row.variance_percent}%`}
                     </td>
                     <td>
-                      <span className={row.status === 'EXCEEDED' ? styles.badgeDanger : styles.badgeSuccess}>
-                        {row.status === 'EXCEEDED' ? '⚠ Exceeded' : '✓ OK'}
+                      <span className={row.status === 'EXCEEDED' ? styles.badgeDanger : row.status === 'INFO' ? styles.badgeDefault : styles.badgeSuccess}>
+                        {row.status === 'EXCEEDED' ? '⚠ Exceeded' : row.status === 'INFO' ? 'Usage only' : '✓ OK'}
                       </span>
                     </td>
                     <td>

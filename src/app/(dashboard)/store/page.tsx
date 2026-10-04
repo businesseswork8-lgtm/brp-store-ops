@@ -75,6 +75,14 @@ export default function StoreDashboardPage() {
       icon: status.openingStock ? '✓' : '!',
     },
     {
+      id: 'deliveries',
+      title: 'Stock Received',
+      text: 'Add anything that arrived from the warehouse',
+      status: 'optional',
+      href: '/store/deliveries',
+      icon: '🚚',
+    },
+    {
       id: 'evening-tally',
       title: 'Evening Cash Tally',
       text: status.eveningTally ? 'Completed for today' : 'Pending',

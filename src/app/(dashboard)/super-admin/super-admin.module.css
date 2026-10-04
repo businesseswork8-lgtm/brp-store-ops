@@ -181,3 +181,114 @@
   padding: 3rem;
   color: var(--text-secondary);
 }
+
+/* ---------- Shared building blocks used across admin pages ---------- */
+.subtitle {
+  color: var(--text-secondary, #8888a0);
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+}
+
+.card {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 1.25rem;
+  overflow-x: auto;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.statTitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #8888a0);
+  margin-bottom: 0.4rem;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.fieldGroup label {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #8888a0);
+}
+
+.fieldGroup input,
+.fieldGroup select,
+.searchInput,
+.selectFilter {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  background: var(--bg-secondary, #16161f);
+  color: var(--text-primary, #fff);
+  font-size: 0.95rem;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 200px;
+}
+
+.primaryButton,
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.primaryButton {
+  background: var(--accent-primary, #ff6b35);
+  color: #fff;
+  border: none;
+}
+
+.secondaryButton {
+  background: var(--bg-secondary, #16161f);
+  color: var(--text-primary, #fff);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.badgeSuccess,
+.badgeDanger,
+.badgeDefault {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badgeSuccess { background: rgba(0, 200, 83, 0.15); color: var(--success, #00c853); }
+.badgeDanger { background: rgba(255, 23, 68, 0.15); color: var(--danger, #ff1744); }
+.badgeDefault { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary, #8888a0); }
