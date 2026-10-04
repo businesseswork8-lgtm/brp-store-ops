@@ -68,6 +68,8 @@ export default function UserAndStaffManagementPage() {
     store_access: [] as string[],
     can_edit: false,
   });
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
+
 
   // User Profile Edit Mode
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -489,14 +491,37 @@ export default function UserAndStaffManagementPage() {
 
                 <div>
                   <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.3rem' }}>Password</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="••••••••"
-                    value={newUser.password}
-                    onChange={e => setNewUser({ ...newUser, password: e.target.value })}
-                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-                  />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type={showNewUserPassword ? 'text' : 'password'}
+                      required
+                      placeholder="••••••••"
+                      value={newUser.password}
+                      onChange={e => setNewUser({ ...newUser, password: e.target.value })}
+                      style={{ width: '100%', padding: '0.75rem', paddingRight: '2.5rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                      style={{
+                        position: 'absolute',
+                        right: '0.75rem',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        fontSize: '1.1rem',
+                        lineHeight: 1,
+                        padding: '0.2rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      title={showNewUserPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showNewUserPassword ? '👁️' : '🙈'}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
