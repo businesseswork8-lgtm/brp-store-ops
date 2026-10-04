@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { istDate, addDays } from '@/lib/dates';
 import styles from '../super-admin.module.css';
-
-type Store = { id: string; name: string; brand_id: string };
 
 type VarianceRow = {
   item_id: string;
@@ -12,276 +12,136 @@ type VarianceRow = {
   category_name: string;
   uom: string;
   opening_stock: number;
+  purchases: number;
   closing_stock: number;
   actual_consumption: number;
   theoretical_consumption: number;
   wastage: number;
   tasting: number;
   variance: number;
-  variance_percent: number;
+  variance_percent: number | null;
   threshold_percent: number;
   status: string;
 };
 
-export default function VarianceDashboardPage() {
-  const supabase = createClient();
+type SoldItem = { item_name: string; sku: string | null; quantity_sold: number; item_type: string | null };
+type Recipe = { id: string; product_name: string; rista_sku: string | null };
+type Breakdown = { posItem: string; qtySold: number; recipeQty: number; totalConsumed: number };
 
-  const [stores, setStores] = useState<Store[]>([]);
-  const [selectedStoreId, setSelectedStoreId] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
+const recipeMatches = (r: Recipe, si: SoldItem) =>
+  r.rista_sku ? r.rista_sku === si.sku : r.product_name.trim().toLowerCase() === si.item_name.trim().toLowerCase();
+
+export default function VarianceDashboardPage() {
+  const { supabase, store } = useActiveStore();
+  const [selectedDate, setSelectedDate] = useState<string>(addDays(istDate(), -1));
   const [varianceData, setVarianceData] = useState<VarianceRow[]>([]);
+  const [unmatched, setUnmatched] = useState<SoldItem[]>([]);
+  const [hasSales, setHasSales] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedItemDetail, setSelectedItemDetail] = useState<VarianceRow | null>(null);
-  const [posBreakdown, setPosBreakdown] = useState<any[]>([]);
+  const [posBreakdown, setPosBreakdown] = useState<Breakdown[]>([]);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
 
-  useEffect(() => {
-    fetchStores();
-  }, []);
+  const loadSoldItems = useCallback(async (): Promise<SoldItem[]> => {
+    if (!store) return [];
+    const { data: day } = await supabase.from('daily_sales_summary').select('id')
+      .eq('store_id', store.id).eq('entry_date', selectedDate).maybeSingle();
+    if (!day) return [];
+    const { data } = await supabase.from('daily_sales_items')
+      .select('item_name, sku, quantity_sold, item_type').eq('sales_summary_id', day.id);
+    return (data || []) as SoldItem[];
+  }, [supabase, store, selectedDate]);
 
-  useEffect(() => {
-    if (selectedStoreId) {
-      calculateVariance();
-    }
-  }, [selectedStoreId, selectedDate]);
-
-  async function fetchStores() {
-    const { data } = await supabase.from('stores').select('*').order('name');
-    if (data && data.length > 0) {
-      setStores(data);
-      setSelectedStoreId(data[0].id);
-    }
-  }
-
-  async function calculateVariance() {
+  const calculateVariance = useCallback(async () => {
+    if (!store) return;
     setLoading(true);
-    // 1. Try invoking Supabase RPC function calculate_daily_variance
-    const { data: rpcData, error: rpcErr } = await supabase.rpc('calculate_daily_variance', {
-      p_store_id: selectedStoreId,
-      p_date: selectedDate,
-    });
+    setError(null);
 
-    if (!rpcErr && rpcData) {
-      setVarianceData(rpcData as VarianceRow[]);
-      setLoading(false);
-      return;
+    // Single source of truth: the database function (no hidden fallback)
+    const [{ data, error: rpcErr }, sold, { data: recipes }] = await Promise.all([
+      supabase.rpc('calculate_daily_variance', { p_store_id: store.id, p_date: selectedDate }),
+      loadSoldItems(),
+      supabase.from('recipes').select('id, product_name, rista_sku').eq('brand_id', store.brand_id),
+    ]);
+
+    if (rpcErr) {
+      console.error(rpcErr);
+      setError('Could not calculate variance: ' + rpcErr.message);
+      setVarianceData([]);
+    } else {
+      setVarianceData((data || []) as VarianceRow[]);
     }
 
-    // 2. Fallback JS calculation if RPC not executed yet
-    console.log('RPC error or missing, calculating client-side fallback...', rpcErr);
-    await calculateClientSide();
+    setHasSales(sold.length > 0);
+    const recs = (recipes || []) as Recipe[];
+    setUnmatched(sold.filter(si => !recs.some(r => recipeMatches(r, si))));
     setLoading(false);
-  }
+  }, [supabase, store, selectedDate, loadSoldItems]);
 
-  async function calculateClientSide() {
-    // Fetch stock
-    const { data: stock } = await supabase
-      .from('daily_stock_entries')
-      .select('*, items(id, name, uom, item_categories(name))')
-      .eq('store_id', selectedStoreId)
-      .eq('entry_date', selectedDate);
-
-    // Fetch sales summary + items
-    const { data: salesSum } = await supabase
-      .from('daily_sales_summary')
-      .select('id')
-      .eq('store_id', selectedStoreId)
-      .eq('entry_date', selectedDate)
-      .maybeSingle();
-
-    let salesItems: any[] = [];
-    if (salesSum) {
-      const { data: sItems } = await supabase
-        .from('daily_sales_items')
-        .select('*')
-        .eq('sales_summary_id', salesSum.id);
-      if (sItems) salesItems = sItems;
-    }
-
-    // Fetch recipes & ingredients
-    const { data: recipes } = await supabase
-      .from('recipes')
-      .select('*, recipe_ingredients(*, items(id, name, uom))');
-
-    // Fetch wastage
-    const { data: wastage } = await supabase
-      .from('daily_wastage_log')
-      .select('*')
-      .eq('store_id', selectedStoreId)
-      .eq('entry_date', selectedDate);
-
-    // Compute map
-    const map = new Map<string, VarianceRow>();
-
-    // Seed from stock
-    (stock || []).forEach(s => {
-      if (!s.items) return;
-      const itemId = s.item_id;
-      const actual = (s.opening_stock || 0) - (s.closing_stock || 0);
-      map.set(itemId, {
-        item_id: itemId,
-        item_name: s.items.name,
-        category_name: s.items.item_categories?.name || 'General',
-        uom: s.items.uom,
-        opening_stock: s.opening_stock || 0,
-        closing_stock: s.closing_stock || 0,
-        actual_consumption: actual,
-        theoretical_consumption: 0,
-        wastage: 0,
-        tasting: 0,
-        variance: 0,
-        variance_percent: 0,
-        threshold_percent: 5.0,
-        status: 'OK',
-      });
-    });
-
-    // Add wastage
-    (wastage || []).forEach(w => {
-      if (map.has(w.item_id)) {
-        const row = map.get(w.item_id)!;
-        row.wastage += w.quantity_wasted || 0;
-      }
-    });
-
-    // Compute POS theoretical consumption
-    if (recipes && salesItems.length > 0) {
-      salesItems.forEach(si => {
-        const rec = recipes.find(
-          r => r.product_name.trim().toLowerCase() === si.item_name.trim().toLowerCase()
-        );
-        if (rec && rec.recipe_ingredients) {
-          rec.recipe_ingredients.forEach((ri: any) => {
-            const consumed = (si.quantity_sold || 0) * (ri.quantity || 0);
-            if (map.has(ri.item_id)) {
-              const row = map.get(ri.item_id)!;
-              row.theoretical_consumption += consumed;
-            }
-          });
-        }
-      });
-    }
-
-    // Final calculations
-    const result: VarianceRow[] = Array.from(map.values()).map(row => {
-      const netActual = row.actual_consumption - row.wastage - row.tasting;
-      const variance = netActual - row.theoretical_consumption;
-      const variancePct =
-        row.theoretical_consumption > 0
-          ? (variance / row.theoretical_consumption) * 100
-          : 0;
-      const isExceeded = Math.abs(variancePct) > row.threshold_percent;
-
-      return {
-        ...row,
-        variance: parseFloat(variance.toFixed(2)),
-        variance_percent: parseFloat(variancePct.toFixed(2)),
-        status: isExceeded ? 'EXCEEDED' : 'OK',
-      };
-    });
-
-    setVarianceData(result);
-  }
+  useEffect(() => { calculateVariance(); }, [calculateVariance]);
 
   async function openDrillDownModal(row: VarianceRow) {
     setSelectedItemDetail(row);
     setBreakdownLoading(true);
 
-    // Fetch POS items matching recipes for this item
-    const { data: salesSum } = await supabase
-      .from('daily_sales_summary')
-      .select('id')
-      .eq('store_id', selectedStoreId)
-      .eq('entry_date', selectedDate)
-      .maybeSingle();
-
-    if (!salesSum) {
-      setPosBreakdown([]);
-      setBreakdownLoading(false);
-      return;
-    }
-
-    const { data: sItems } = await supabase
-      .from('daily_sales_items')
-      .select('*')
-      .eq('sales_summary_id', salesSum.id);
-
+    const sold = await loadSoldItems();
     const { data: recipeIng } = await supabase
       .from('recipe_ingredients')
-      .select('*, recipes(product_name)')
-      .eq('item_id', row.item_id);
+      .select('quantity, recipes!inner(id, product_name, rista_sku, brand_id)')
+      .eq('item_id', row.item_id)
+      .eq('recipes.brand_id', store!.brand_id);
 
-    const breakdown: any[] = [];
-    if (sItems && recipeIng) {
-      recipeIng.forEach(ri => {
-        const prodName = ri.recipes?.product_name;
-        const matchedPOS = sItems.find(
-          si => si.item_name.trim().toLowerCase() === prodName?.trim().toLowerCase()
-        );
-        if (matchedPOS) {
-          breakdown.push({
-            posItem: matchedPOS.item_name,
-            qtySold: matchedPOS.quantity_sold,
-            recipeQty: ri.quantity,
-            totalConsumed: matchedPOS.quantity_sold * ri.quantity,
-          });
-        }
+    const breakdown: Breakdown[] = [];
+    (recipeIng || []).forEach(ri => {
+      const rec = ri.recipes as unknown as Recipe;
+      sold.filter(si => recipeMatches(rec, si)).forEach(si => {
+        breakdown.push({
+          posItem: si.item_name,
+          qtySold: si.quantity_sold,
+          recipeQty: ri.quantity,
+          totalConsumed: si.quantity_sold * ri.quantity,
+        });
       });
-    }
+    });
 
     setPosBreakdown(breakdown);
     setBreakdownLoading(false);
   }
 
   // Summary KPIs
-  const totalActual = varianceData.reduce((acc, r) => acc + (r.actual_consumption || 0), 0);
-  const totalTheo = varianceData.reduce((acc, r) => acc + (r.theoretical_consumption || 0), 0);
-  const totalWaste = varianceData.reduce((acc, r) => acc + (r.wastage || 0), 0);
   const alertsCount = varianceData.filter(r => r.status === 'EXCEEDED').length;
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Stock Variance & Audit Dashboard</h1>
+          <h1 className={styles.title}>Stock Variance{store ? ` — ${store.name}` : ''}</h1>
           <p className={styles.subtitle}>
-            Compare physical stock logs against POS sales theoretical recipe consumption to detect leakage & wastage
+            Stock actually used vs. what sales say should have been used. Change store from the top bar.
           </p>
         </div>
-        <a href="/super-admin/variance/thresholds" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
-          ⚙️ Tolerance Thresholds
-        </a>
+        <Link href="/super-admin/variance/thresholds" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+          ⚙️ Alert Limits
+        </Link>
       </div>
 
       {/* Control Bar */}
       <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <div className={styles.fieldGroup} style={{ marginBottom: 0, minWidth: '220px' }}>
-            <label>Select Store</label>
-            <select
-              value={selectedStoreId}
-              onChange={e => setSelectedStoreId(e.target.value)}
-            >
-              {stores.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-
           <div className={styles.fieldGroup} style={{ marginBottom: 0, minWidth: '180px' }}>
-            <label>Audit Date</label>
+            <label>Date</label>
             <input
               type="date"
               value={selectedDate}
+              max={istDate()}
               onChange={e => setSelectedDate(e.target.value)}
             />
           </div>
 
           <div style={{ alignSelf: 'flex-end' }}>
             <button className={styles.primaryButton} onClick={calculateVariance}>
-              🔄 Refresh Variance Audit
+              🔄 Refresh
             </button>
           </div>
         </div>
@@ -290,27 +150,48 @@ export default function VarianceDashboardPage() {
       {/* KPI Cards */}
       <div className={styles.statGrid}>
         <div className={styles.statCard}>
-          <div className={styles.statTitle}>Total Actual Stock Used</div>
-          <div className={styles.statValue}>{totalActual.toFixed(1)} <span style={{ fontSize: '1rem' }}>g/pcs</span></div>
+          <div className={styles.statTitle}>Items checked</div>
+          <div className={styles.statValue}>{varianceData.length}</div>
         </div>
-
         <div className={styles.statCard}>
-          <div className={styles.statTitle}>Theoretical POS Target</div>
-          <div className={styles.statValue}>{totalTheo.toFixed(1)} <span style={{ fontSize: '1rem' }}>g/pcs</span></div>
-        </div>
-
-        <div className={styles.statCard}>
-          <div className={styles.statTitle}>Logged Wastage</div>
-          <div className={styles.statValue} style={{ color: 'var(--warning)' }}>{totalWaste.toFixed(1)} <span style={{ fontSize: '1rem' }}>g/pcs</span></div>
-        </div>
-
-        <div className={styles.statCard}>
-          <div className={styles.statTitle}>Audit Discrepancy Alerts</div>
+          <div className={styles.statTitle}>Items over limit</div>
           <div className={styles.statValue} style={{ color: alertsCount > 0 ? 'var(--danger)' : 'var(--success)' }}>
-            {alertsCount} {alertsCount > 0 ? '⚠ Alert' : '✓ Clean'}
+            {alertsCount} {alertsCount > 0 ? '⚠' : '✓'}
+          </div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statTitle}>Sales report</div>
+          <div className={styles.statValue} style={{ color: hasSales ? 'var(--success)' : 'var(--warning)' }}>
+            {hasSales ? '✓ Uploaded' : 'Missing'}
+          </div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statTitle}>Products with no recipe</div>
+          <div className={styles.statValue} style={{ color: unmatched.length > 0 ? 'var(--warning)' : 'var(--success)' }}>
+            {unmatched.length}
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className={styles.card} style={{ marginBottom: '1.5rem', color: 'var(--danger)' }}>{error}</div>
+      )}
+
+      {unmatched.length > 0 && (
+        <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ marginTop: 0, color: 'var(--warning)' }}>⚠ Sold products with no recipe ({unmatched.length})</h3>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            These were sold but no recipe is linked, so their ingredients are not counted. Stock used for them will show as missing.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            {unmatched.map((u, i) => (
+              <span key={i} className={styles.badgeDanger} title={u.sku ? `SKU ${u.sku}` : ''}>
+                {u.item_name} × {u.quantity_sold}{u.sku ? ` (SKU ${u.sku})` : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Main Table */}
       {loading ? (
@@ -325,6 +206,7 @@ export default function VarianceDashboardPage() {
                 <th>Raw Material</th>
                 <th>Category</th>
                 <th>Opening</th>
+                <th>Received</th>
                 <th>Closing</th>
                 <th>Actual Used</th>
                 <th>POS Theo Target</th>
@@ -338,12 +220,8 @@ export default function VarianceDashboardPage() {
             <tbody>
               {varianceData.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-                    No stock entry or POS report uploaded for this store on {selectedDate}.
-                    <br />
-                    <span style={{ fontSize: '0.9rem', color: 'var(--accent-primary)' }}>
-                      Ensure morning/evening stock is submitted and POS file is uploaded in Store Portal.
-                    </span>
+                  <td colSpan={12} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                    No completed stock count (opening + closing) for {store?.name || 'this store'} on {selectedDate}.
                   </td>
                 </tr>
               ) : (
@@ -357,6 +235,7 @@ export default function VarianceDashboardPage() {
                     <td style={{ fontWeight: 600 }}>{row.item_name}</td>
                     <td>{row.category_name}</td>
                     <td>{row.opening_stock}</td>
+                    <td>{Number(row.purchases) ? row.purchases : '–'}</td>
                     <td>{row.closing_stock}</td>
                     <td style={{ fontWeight: 600 }}>{row.actual_consumption} {row.uom}</td>
                     <td style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>
@@ -366,13 +245,15 @@ export default function VarianceDashboardPage() {
                     <td
                       style={{
                         fontWeight: 700,
-                        color: row.variance > 0 ? 'var(--danger)' : row.variance < 0 ? 'var(--success)' : 'inherit',
+                        color: Number(row.variance) > 0 ? 'var(--danger)' : Number(row.variance) < 0 ? 'var(--success)' : 'inherit',
                       }}
                     >
-                      {row.variance > 0 ? `+${row.variance}` : row.variance} {row.uom}
+                      {Number(row.variance) > 0 ? `+${row.variance}` : row.variance} {row.uom}
                     </td>
                     <td style={{ fontWeight: 600 }}>
-                      {row.variance_percent > 0 ? `+${row.variance_percent}%` : `${row.variance_percent}%`}
+                      {row.variance_percent === null
+                        ? (Number(row.variance) > 0 ? 'No sales to explain' : '–')
+                        : Number(row.variance_percent) > 0 ? `+${row.variance_percent}%` : `${row.variance_percent}%`}
                     </td>
                     <td>
                       <span className={row.status === 'EXCEEDED' ? styles.badgeDanger : styles.badgeSuccess}>
@@ -384,7 +265,7 @@ export default function VarianceDashboardPage() {
                         className={styles.secondaryButton}
                         onClick={() => openDrillDownModal(row)}
                       >
-                        Drill Down
+                        Details
                       </button>
                     </td>
                   </tr>

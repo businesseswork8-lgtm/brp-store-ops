@@ -1,393 +1,223 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useRef, useState } from 'react';
+import Link from 'next/link';
 import { parseRistaPOSFile, ParsedPOSReport } from '@/lib/services/rista-parser';
-import { createClient } from '@/lib/supabase/client';
+import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { istDate, addDays } from '@/lib/dates';
 import styles from './page.module.css';
 
-type StaffMember = { id: string; name: string };
-type Store = { id: string; name: string; code: string };
+type Parsed = ParsedPOSReport & { fileName: string };
+
+const inr = (n: number) => `₹ ${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const norm = (s: string | null | undefined) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 export default function SalesUploadPage() {
-  const supabase = createClient();
+  const { supabase, store } = useActiveStore();
+  const [files, setFiles] = useState<Parsed[]>([]);
+  const [itemsDate, setItemsDate] = useState(addDays(istDate(), -1));
+  const [dragging, setDragging] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const [activeStore, setActiveStore] = useState<Store | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-  const [selectedStaffId, setSelectedStaffId] = useState<string>('');
+  const summary = files.find(f => f.kind === 'summary');
+  const items = files.find(f => f.kind === 'items');
 
-  const [report, setReport] = useState<ParsedPOSReport | null>(null);
-  const [fileName, setFileName] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState({ type: '', text: '' });
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    loadStoreAndStaff();
-
-    const handleStoreChange = () => {
-      loadStoreAndStaff();
-    };
-
-    window.addEventListener('storeChange', handleStoreChange);
-    return () => window.removeEventListener('storeChange', handleStoreChange);
-  }, []);
-
-  async function loadStoreAndStaff() {
-    let storeId = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
-    
-    if (!storeId) {
-      const { data: stores } = await supabase.from('stores').select('id, name, code').order('name');
-      if (stores && stores.length > 0) {
-        storeId = stores[0].id;
-      }
-    }
-
-    if (storeId) {
-      localStorage.setItem('selectedStore', storeId);
-      localStorage.setItem('brp_selected_store', storeId);
-
-      const { data: storeData } = await supabase
-        .from('stores')
-        .select('id, name, code')
-        .eq('id', storeId)
-        .single();
-      if (storeData) setActiveStore(storeData);
-
-      const { data: staffData } = await supabase
-        .from('staff_members')
-        .select('id, name')
-        .eq('store_id', storeId)
-        .eq('is_active', true);
-
-      if (staffData && staffData.length > 0) {
-        setStaffMembers(staffData);
-        setSelectedStaffId(staffData[0].id);
-      } else {
-        setStaffMembers([]);
-        setSelectedStaffId('');
-      }
-    }
-  }
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFileName(file.name);
-    const reader = new FileReader();
-
-    reader.onload = (event) => {
+  // ---- read files ----
+  const readFiles = async (list: FileList | File[]) => {
+    setMessage(null);
+    const parsed: Parsed[] = [];
+    for (const file of Array.from(list).slice(0, 2)) {
       try {
-        const content = event.target?.result as ArrayBuffer;
-        const parsed = parseRistaPOSFile(content);
-
-        setReport(parsed);
-        setMessage({ type: 'success', text: `Successfully parsed ${file.name}!` });
-      } catch (err: any) {
-        console.error('Error parsing file:', err);
-        setMessage({
-          type: 'error',
-          text: 'Failed to parse CSV/Excel file. Ensure it is a valid Rista POS export.',
-        });
+        const buf = await file.arrayBuffer();
+        parsed.push({ ...parseRistaPOSFile(buf, file.name), fileName: file.name });
+      } catch (e) {
+        console.error(e);
+        setMessage({ type: 'error', text: `Could not read "${file.name}". Is it a Rista CSV/Excel export?` });
       }
-    };
-
-    reader.readAsArrayBuffer(file);
+    }
+    if (parsed.filter(p => p.kind === 'summary').length > 1 || parsed.filter(p => p.kind === 'items').length > 1) {
+      setMessage({ type: 'error', text: 'Please select one Sales Summary and/or one Sales By Items file — not two of the same kind.' });
+      return;
+    }
+    setFiles(parsed);
   };
 
-  const handleSubmit = async () => {
-    if (!activeStore) {
-      setMessage({ type: 'error', text: 'No active store selected. Please select a store in the header.' });
-      return;
+  // ---- validation ----
+  const problems: string[] = [];
+  if (store) {
+    for (const f of files) {
+      problems.push(...f.warnings.map(w => `${f.fileName}: ${w}`));
+      const expected = store.rista_branch_name;
+      if (expected && f.branch && norm(f.branch) !== norm(expected)) {
+        problems.push(`"${f.fileName}" is from "${f.branch}", but this store is ${store.name} ("${expected}"). Please download the report for this store.`);
+      }
     }
-
-    if (!report) {
-      setMessage({ type: 'error', text: 'Please select a valid Rista POS report CSV file.' });
-      return;
+    if (summary && items && Math.abs(summary.summary.net_sales - items.summary.net_sales) > 1) {
+      problems.push(`The two files don't match: Sales Summary net sales ${inr(summary.summary.net_sales)}, Sales By Items ${inr(items.summary.net_sales)}. They are probably from different days — please download both for the same day.`);
     }
+    if (summary?.date && summary.date > istDate()) problems.push('The Sales Summary date is in the future.');
+  }
+  const date = summary?.date || (items ? itemsDate : null);
+  const canSave = Boolean(store && files.length && date && problems.length === 0);
 
-    setIsLoading(true);
-    setMessage({ type: '', text: '' });
-
+  // ---- save ----
+  const handleSave = async () => {
+    if (!store || !date) return;
+    setSaving(true);
+    setMessage(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      let profileId = user?.id;
+      if (!user) throw new Error('Session expired. Please log in again.');
 
-      if (!profileId) {
-        const { data: profs } = await supabase.from('profiles').select('id').limit(1);
-        if (profs && profs.length > 0) profileId = profs[0].id;
+      const base = { store_id: store.id, entry_date: date, submitted_by_profile_id: user.id };
+
+      // 1. Summary: write only summary columns (never touches item data)
+      if (summary) {
+        const s = summary.summary;
+        const { error } = await supabase.from('daily_sales_summary').upsert({
+          ...base,
+          gross_sales: s.gross_sales, net_sales: s.net_sales, total_discount: s.total_discount,
+          total_tax: s.total_tax, service_charges: s.service_charges, total_orders: s.total_orders,
+          cash_amount: s.cash_amount, upi_amount: s.upi_amount, card_amount: s.card_amount,
+          swiggy_amount: s.swiggy_amount, zomato_amount: s.zomato_amount, other_online_amount: s.other_online_amount,
+          dine_in_amount: s.dine_in_amount, takeaway_amount: s.takeaway_amount,
+          has_summary: true,
+        }, { onConflict: 'store_id,entry_date' });
+        if (error) throw error;
       }
 
-      if (!profileId) {
-        throw new Error('User session not found. Please re-login.');
-      }
-
-      const summaryPayload = {
-        store_id: activeStore.id,
-        entry_date: selectedDate,
-        gross_sales: report.summary.gross_sales,
-        net_sales: report.summary.net_sales,
-        total_discount: report.summary.total_discount,
-        total_tax: report.summary.total_tax,
-        total_orders: report.summary.total_orders,
-        cash_amount: report.summary.cash_amount,
-        upi_amount: report.summary.upi_amount,
-        card_amount: report.summary.card_amount,
-        swiggy_amount: report.summary.swiggy_amount,
-        zomato_amount: report.summary.zomato_amount,
-        other_online_amount: report.summary.other_online_amount,
-        staff_member_id: selectedStaffId || null,
-        submitted_by_profile_id: profileId,
-      };
-
-      const { data: summaryData, error: summaryErr } = await supabase
-        .from('daily_sales_summary')
-        .upsert(summaryPayload, { onConflict: 'store_id,entry_date' })
-        .select()
-        .single();
-
-      if (summaryErr) throw summaryErr;
-
-      if (report.items.length > 0 && summaryData) {
-        await supabase.from('daily_sales_items').delete().eq('sales_summary_id', summaryData.id);
-
-        const itemsToInsert = report.items.map(i => ({
-          sales_summary_id: summaryData.id,
+      // 2. Items: attach to the day's row without overwriting its money figures
+      if (items) {
+        let { data: row } = await supabase.from('daily_sales_summary').select('id')
+          .eq('store_id', store.id).eq('entry_date', date).maybeSingle();
+        if (!row) {
+          const { data: created, error } = await supabase.from('daily_sales_summary')
+            .insert({ ...base, net_sales: items.summary.net_sales, has_summary: false })
+            .select('id').single();
+          if (error) throw error;
+          row = created;
+        }
+        const { error: delErr } = await supabase.from('daily_sales_items').delete().eq('sales_summary_id', row!.id);
+        if (delErr) throw delErr;
+        const { error: insErr } = await supabase.from('daily_sales_items').insert(items.items.map(i => ({
+          sales_summary_id: row!.id,
+          sku: i.sku || null,
+          item_type: i.item_type,
           item_name: i.item_name,
+          variant: i.variant || null,
           quantity_sold: i.quantity_sold,
           unit_price: i.unit_price,
           total_price: i.total_price,
           category: i.category || null,
-        }));
-
-        await supabase.from('daily_sales_items').insert(itemsToInsert);
+        })));
+        if (insErr) throw insErr;
+        const { error: flagErr } = await supabase.from('daily_sales_summary').update({ has_items: true }).eq('id', row!.id);
+        if (flagErr) throw flagErr;
       }
 
-      setMessage({
-        type: 'success',
-        text: `✅ POS Sales Report for ${activeStore.name} (${selectedDate}) saved successfully!`,
-      });
-
-      setReport(null);
-      setFileName('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    } catch (err: any) {
-      console.error('Upload Error:', err);
-      setMessage({ type: 'error', text: 'Error saving report: ' + (err.message || String(err)) });
+      const what = [summary && 'Sales Summary', items && 'Sales By Items'].filter(Boolean).join(' + ');
+      setMessage({ type: 'success', text: `✅ ${what} saved for ${store.name}, ${date}.` });
+      setFiles([]);
+      if (inputRef.current) inputRef.current.value = '';
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'error', text: 'Could not save: ' + (err instanceof Error ? err.message : String(err)) });
     } finally {
-      setIsLoading(false);
+      setSaving(false);
     }
   };
 
+  if (!store) return <div className={styles.container}>No store is assigned to this login. Please contact your manager.</div>;
+
+  const s = summary?.summary;
+
   return (
     <div className={styles.container}>
-      <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
         <div>
-          <h1 className={styles.title}>Rista POS Sales Report Upload</h1>
+          <h1 className={styles.title}>Upload Sales Report</h1>
           <p className={styles.subtitle}>
-            Upload daily Rista POS CSV export for {activeStore ? activeStore.name : 'Selected Store'}
+            In Rista, download <strong>Sales Summary</strong> for the day and upload it here.
           </p>
         </div>
-        <a href="/store" style={{ padding: '0.6rem 1.2rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-          ← Back to Daily Operations
-        </a>
+        <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>
 
-      {/* Control Bar: Active Store Info & Date */}
-      <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', alignItems: 'center' }}>
-          <div>
-            <span style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Target Store</span>
-            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--accent-primary)', marginTop: '0.2rem' }}>
-              🏬 {activeStore ? activeStore.name : 'Loading...'}
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-              Sales Report Date
-            </label>
-            <input
-              type="date"
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-              value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
-            />
-          </div>
-
-          {staffMembers.length > 0 && (
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                Submitted By Staff (Optional)
-              </label>
-              <select
-                style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-                value={selectedStaffId}
-                onChange={e => setSelectedStaffId(e.target.value)}
-              >
-                {staffMembers.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* File Upload Drop Zone */}
-      <div className={styles.card} style={{ marginBottom: '1.5rem', textAlign: 'center', padding: '2.5rem' }}>
+      {/* Drop zone */}
+      <div
+        className={`${styles.card} ${styles.dropZone} ${dragging ? styles.dragging : ''}`}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) readFiles(e.dataTransfer.files); }}
+        onClick={() => inputRef.current?.click()}
+        role="button"
+        tabIndex={0}
+      >
         <input
           type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          accept=".csv, .xlsx, .xls"
+          ref={inputRef}
+          multiple
+          accept=".csv,.xlsx,.xls"
           style={{ display: 'none' }}
-          id="pos-file-upload"
+          onChange={e => e.target.files && readFiles(e.target.files)}
         />
-
-        <label htmlFor="pos-file-upload" style={{ cursor: 'pointer', display: 'block' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📄</div>
-          <h3 style={{ margin: '0 0 0.5rem 0' }}>
-            {fileName ? `Selected File: ${fileName}` : 'Click to Browse or Drag Rista POS CSV File'}
-          </h3>
-          <p style={{ color: 'var(--text-secondary)', margin: 0, fontSize: '0.9rem' }}>
-            Supports Rista POS Sales Summary by Hour and Itemized Sales Export files (.csv, .xlsx)
-          </p>
-        </label>
+        <div style={{ fontSize: '2.5rem' }}>📄</div>
+        <h3 style={{ margin: '0.5rem 0' }}>
+          {files.length ? files.map(f => f.fileName).join(', ') : 'Tap to choose file, or drag it here'}
+        </h3>
+        <p className={styles.subtitle} style={{ margin: 0 }}>
+          Sales Summary (daily). Sales By Items can be added too.
+        </p>
       </div>
 
-      {/* Message Banner */}
-      {message.text && (
-        <div
-          className={styles.card}
-          style={{
-            marginBottom: '1.5rem',
-            background: message.type === 'error' ? 'rgba(255,23,68,0.1)' : 'rgba(0,200,83,0.1)',
-            borderColor: message.type === 'error' ? 'var(--danger)' : 'var(--success)',
-            color: message.type === 'error' ? 'var(--danger)' : 'var(--success)',
-          }}
-        >
-          {message.text}
+      {message && (
+        <div className={`${styles.alert} ${message.type === 'error' ? styles.error : styles.success}`}>{message.text}</div>
+      )}
+
+      {problems.length > 0 && (
+        <div className={`${styles.alert} ${styles.error}`}>
+          {problems.map((p, i) => <div key={i}>⚠ {p}</div>)}
         </div>
       )}
 
-      {/* Parsed Preview Cards */}
-      {report && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>
-              Parsed POS Report Summary Preview
-            </h3>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
-              <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Net Sales</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--success)' }}>
-                  ₹ {report.summary.net_sales.toLocaleString('en-IN')}
-                </div>
-              </div>
-
-              <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Gross Sales</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                  ₹ {report.summary.gross_sales.toLocaleString('en-IN')}
-                </div>
-              </div>
-
-              <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Discounts</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--warning)' }}>
-                  ₹ {report.summary.total_discount.toLocaleString('en-IN')}
-                </div>
-              </div>
-
-              <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Taxes</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                  ₹ {report.summary.total_tax.toLocaleString('en-IN')}
-                </div>
-              </div>
-
-              <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Total Orders</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-                  {report.summary.total_orders}
-                </div>
-              </div>
+      {files.length > 0 && (
+        <div className={styles.card}>
+          <div className={styles.factRow}>
+            <div><span className={styles.factLabel}>Store</span><strong>{store.name}</strong></div>
+            <div>
+              <span className={styles.factLabel}>Sales date</span>
+              {summary?.date ? (
+                <strong>{summary.date}</strong>
+              ) : items ? (
+                <input type="date" className={styles.dateInput} value={itemsDate} max={istDate()}
+                  onChange={e => setItemsDate(e.target.value)} />
+              ) : <strong>—</strong>}
             </div>
-
-            {/* Channel Splits */}
-            <h4 style={{ margin: '1.5rem 0 0.5rem 0', color: 'var(--text-primary)' }}>Channel Revenue Breakdown</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
-              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>🛵 Swiggy Sales</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#fc8019' }}>
-                  ₹ {report.summary.swiggy_amount.toLocaleString('en-IN')}
-                </div>
-              </div>
-
-              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>🔴 Zomato Sales</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#cb202d' }}>
-                  ₹ {report.summary.zomato_amount.toLocaleString('en-IN')}
-                </div>
-              </div>
-
-              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>🏬 Walk-In / Cash Sales</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--success)' }}>
-                  ₹ {report.summary.cash_amount.toLocaleString('en-IN')}
-                </div>
-              </div>
-            </div>
+            {items && <div><span className={styles.factLabel}>Items sold</span><strong>{items.items.filter(i => i.item_type !== 'Option').length} products</strong></div>}
           </div>
 
-          {/* Category Summary Preview */}
-          {report.categories && report.categories.length > 0 && (
-            <div className={styles.card}>
-              <h4 style={{ margin: '0 0 0.75rem 0' }}>Category Breakdown Preview</h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
-                    <th style={{ padding: '0.5rem' }}>Category</th>
-                    <th style={{ padding: '0.5rem' }}>Sales Amount</th>
-                    <th style={{ padding: '0.5rem' }}>Quantity Sold</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.categories.map((c, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '0.5rem', fontWeight: 600 }}>{c.category_name}</td>
-                      <td style={{ padding: '0.5rem' }}>₹ {c.amount.toLocaleString('en-IN')}</td>
-                      <td style={{ padding: '0.5rem' }}>{c.quantity} pcs</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {s && (
+            <>
+              <h3 className={styles.sectionTitle}>Money</h3>
+              <div className={styles.factGrid}>
+                <div><span className={styles.factLabel}>Net sales</span><strong>{inr(s.net_sales)}</strong></div>
+                <div><span className={styles.factLabel}>Orders</span><strong>{s.total_orders}</strong></div>
+                <div><span className={styles.factLabel}>Discounts</span><strong>{inr(s.total_discount)}</strong></div>
+                <div><span className={styles.factLabel}>Cash</span><strong>{inr(s.cash_amount)}</strong></div>
+                <div><span className={styles.factLabel}>UPI</span><strong>{inr(s.upi_amount)}</strong></div>
+                <div><span className={styles.factLabel}>Card</span><strong>{inr(s.card_amount)}</strong></div>
+                <div><span className={styles.factLabel}>Swiggy</span><strong>{inr(s.swiggy_amount)}</strong></div>
+                <div><span className={styles.factLabel}>Zomato</span><strong>{inr(s.zomato_amount)}</strong></div>
+                {s.other_online_amount > 0 && <div><span className={styles.factLabel}>Other</span><strong>{inr(s.other_online_amount)}</strong></div>}
+              </div>
+            </>
           )}
 
-          {/* Confirm & Save Button */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              style={{
-                padding: '0.85rem 2rem',
-                borderRadius: '8px',
-                background: 'var(--accent-primary)',
-                color: '#fff',
-                border: 'none',
-                fontWeight: 600,
-                fontSize: '1rem',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-              }}
-              onClick={handleSubmit}
-              disabled={isLoading}
-            >
-              {isLoading ? 'Saving Report...' : '✓ Confirm & Save Sales Report'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+            <button className={styles.saveButton} onClick={handleSave} disabled={!canSave || saving}>
+              {saving ? 'Saving…' : '✓ Save'}
             </button>
           </div>
         </div>

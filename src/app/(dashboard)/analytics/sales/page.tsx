@@ -1,5 +1,6 @@
 'use client';
 
+import { istDate } from '@/lib/dates';
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -43,7 +44,7 @@ export default function SalesAnalyticsPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    istDate()
   );
   
   const [salesData, setSalesData] = useState<DailySalesSummary[]>([]);
@@ -127,8 +128,12 @@ export default function SalesAnalyticsPage() {
   const totalDiscount = salesData.reduce((acc, curr) => acc + (curr.total_discount || 0), 0);
   const totalSwiggy = salesData.reduce((acc, curr) => acc + (curr.swiggy_amount || 0), 0);
   const totalZomato = salesData.reduce((acc, curr) => acc + (curr.zomato_amount || 0), 0);
-  const totalCash = salesData.reduce((acc, curr) => acc + (curr.cash_amount || 0), 0);
-  const grandChannelTotal = totalSwiggy + totalZomato + totalCash || 1;
+  const totalCash = salesData.reduce((acc, curr) => acc + Number(curr.cash_amount || 0), 0);
+  const totalUpi = salesData.reduce((acc, curr) => acc + Number(curr.upi_amount || 0), 0);
+  const totalCard = salesData.reduce((acc, curr) => acc + Number(curr.card_amount || 0), 0);
+  const grandChannelTotal = totalSwiggy + totalZomato + totalCash + totalUpi + totalCard || 1;
+  const upiPct = Math.round((totalUpi / grandChannelTotal) * 100);
+  const cardPct = Math.round((totalCard / grandChannelTotal) * 100);
 
   const swiggyPct = Math.round((totalSwiggy / grandChannelTotal) * 100);
   const zomatoPct = Math.round((totalZomato / grandChannelTotal) * 100);
@@ -230,7 +235,7 @@ export default function SalesAnalyticsPage() {
 
       {/* Visual Channel Distribution Progress Bar */}
       <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ margin: '0 0 0.75rem 0' }}>Channel Revenue Share Split</h3>
+        <h3 style={{ margin: '0 0 0.75rem 0' }}>How customers paid</h3>
         
         <div style={{ display: 'flex', height: '24px', borderRadius: '12px', overflow: 'hidden', background: 'var(--bg-secondary)', marginBottom: '1rem' }}>
           <div style={{ width: `${swiggyPct}%`, background: '#fc8019', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
@@ -241,6 +246,12 @@ export default function SalesAnalyticsPage() {
           </div>
           <div style={{ width: `${cashPct}%`, background: 'var(--success)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
             {cashPct > 5 ? `${cashPct}%` : ''}
+          </div>
+          <div style={{ width: `${upiPct}%`, background: '#5f6bff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
+            {upiPct > 5 ? `${upiPct}%` : ''}
+          </div>
+          <div style={{ width: `${cardPct}%`, background: '#9e9eb8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#fff' }}>
+            {cardPct > 5 ? `${cardPct}%` : ''}
           </div>
         </div>
 
@@ -255,7 +266,15 @@ export default function SalesAnalyticsPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: 'var(--success)', display: 'inline-block' }}></span>
-            <span>Walk-In Cash: <strong>{formatCurrency(totalCash)} ({cashPct}%)</strong></span>
+            <span>Cash: <strong>{formatCurrency(totalCash)} ({cashPct}%)</strong></span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#5f6bff', display: 'inline-block' }}></span>
+            <span>UPI: <strong>{formatCurrency(totalUpi)} ({upiPct}%)</strong></span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#9e9eb8', display: 'inline-block' }}></span>
+            <span>Card: <strong>{formatCurrency(totalCard)} ({cardPct}%)</strong></span>
           </div>
         </div>
       </div>

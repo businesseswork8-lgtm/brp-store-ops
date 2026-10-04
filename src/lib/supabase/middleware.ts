@@ -24,37 +24,54 @@ export async function updateSession(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
+  const path = request.nextUrl.pathname
 
-  // Protected routes - redirect to login if not authenticated
-  const isAuthPage = request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/reset-password')
-  const isProtectedRoute = request.nextUrl.pathname.startsWith('/store') || 
-    request.nextUrl.pathname.startsWith('/analytics') || 
-    request.nextUrl.pathname.startsWith('/super-admin')
+  const isAuthPage = path.startsWith('/login')
+  const isProtectedRoute = path.startsWith('/store') || path.startsWith('/analytics') || path.startsWith('/super-admin')
 
-  if (!user && isProtectedRoute) {
+  const redirectTo = (pathname: string) => {
     const url = request.nextUrl.clone()
-    url.pathname = '/login'
+    url.pathname = pathname
+    url.search = ''
     return NextResponse.redirect(url)
   }
 
-  if (user && isAuthPage) {
-    // If logged in and trying to access auth pages, redirect based on role
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    const url = request.nextUrl.clone()
-    if (profile?.role === 'super_admin') {
-      url.pathname = '/super-admin/variance'
-    } else if (profile?.role === 'admin') {
-      url.pathname = '/analytics/sales'
-    } else {
-      url.pathname = '/store'
-    }
-    return NextResponse.redirect(url)
+  if (!user) {
+    return isProtectedRoute ? redirectTo('/login') : supabaseResponse
   }
+
+  if (!isAuthPage && !isProtectedRoute) return supabaseResponse
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, is_active')
+    .eq('id', user.id)
+    .single()
+
+  // Deactivated or missing profile: send back to login
+  if (!profile || profile.is_active === false) {
+    await supabase.auth.signOut()
+    return isAuthPage ? supabaseResponse : redirectTo('/login')
+  }
+
+  const home = profile.role === 'super_admin' ? '/super-admin/variance'
+    : profile.role === 'admin' ? '/analytics/sales'
+    : '/store'
+
+  if (isAuthPage) return redirectTo(home)
+
+  // Role-based access (the database enforces this too)
+  const allowed =
+    profile.role === 'super_admin' ||
+    (profile.role === 'admin' && (
+      path.startsWith('/analytics') ||
+      path.startsWith('/store') ||
+      path === '/super-admin' ||
+      path === '/super-admin/variance'
+    )) ||
+    (profile.role === 'store' && path.startsWith('/store'))
+
+  if (!allowed) return redirectTo(home)
 
   return supabaseResponse
 }

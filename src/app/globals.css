@@ -722,3 +722,32 @@ textarea.form-control {
   h1 { font-size: 2rem; }
   h2 { font-size: 1.75rem; }
 }
+
+/* ---------- Print (Day Summary / reports) ---------- */
+@media print {
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .dashboard-main-content {
+    margin-left: 0 !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  button, select, a[href] {
+    display: none !important;
+  }
+  input[type="date"] {
+    border: none !important;
+    background: transparent !important;
+    color: #000 !important;
+  }
+  * {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #ccc !important;
+  }
+}

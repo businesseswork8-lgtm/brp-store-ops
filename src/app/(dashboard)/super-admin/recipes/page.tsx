@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import styles from '../super-admin.module.css';
 
 type Brand = { id: string; name: string };
-type Item = { id: string; name: string; uom: string };
+type Item = { id: string; name: string; uom: string; brand_id: string };
 
 type RecipeIngredient = {
   id: string;
@@ -40,7 +40,7 @@ export default function RecipesPage() {
   const [newRecipe, setNewRecipe] = useState({
     product_name: '',
     brand_id: '',
-    product_category: 'Holland Pancakes',
+    product_category: '',
   });
   const [newIngredients, setNewIngredients] = useState<{ item_id: string; quantity: number }[]>([
     { item_id: '', quantity: 0 },
@@ -52,8 +52,12 @@ export default function RecipesPage() {
   // Editing state for ingredient quantities per recipe
   const [editingQuantities, setEditingQuantities] = useState<Record<string, number>>({});
 
+  // Only offer ingredients from the recipe's own brand
+  const itemsForBrand = (brandId: string) => items.filter(i => i.brand_id === brandId);
+
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function fetchData() {
@@ -66,13 +70,11 @@ export default function RecipesPage() {
       }
     }
 
-    const { data: iData } = await supabase.from('items').select('id, name, uom').order('name');
-    if (iData) {
-      setItems(iData);
-      if (iData.length > 0 && newIngredients[0].item_id === '') {
-        setNewIngredients([{ item_id: iData[0].id, quantity: 0 }]);
-      }
-    }
+    const { data: iRaw } = await supabase.from('items')
+      .select('id, name, uom, is_active, item_categories(brand_id)').eq('is_active', true).order('name');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const iData = (iRaw || []).map((i: any) => ({ id: i.id, name: i.name, uom: i.uom, brand_id: i.item_categories?.brand_id }));
+    setItems(iData);
 
     const { data: rData } = await supabase
       .from('recipes')
@@ -94,7 +96,7 @@ export default function RecipesPage() {
   }
 
   function handleAddIngredientRow() {
-    const defaultItemId = items[0]?.id || '';
+    const defaultItemId = '';
     setNewIngredients([...newIngredients, { item_id: defaultItemId, quantity: 0 }]);
   }
 
@@ -134,8 +136,8 @@ export default function RecipesPage() {
     }
 
     setIsAdding(false);
-    setNewRecipe({ product_name: '', brand_id: brands[0]?.id || '', product_category: 'Holland Pancakes' });
-    setNewIngredients([{ item_id: items[0]?.id || '', quantity: 0 }]);
+    setNewRecipe({ product_name: '', brand_id: brands[0]?.id || '', product_category: '' });
+    setNewIngredients([{ item_id: '', quantity: 0 }]);
     fetchData();
   }
 
@@ -169,7 +171,7 @@ export default function RecipesPage() {
     });
 
     if (!error) {
-      setAddIngredientMap(prev => ({ ...prev, [recipeId]: { item_id: items[0]?.id || '', quantity: 0 } }));
+      setAddIngredientMap(prev => ({ ...prev, [recipeId]: { item_id: '', quantity: 0 } }));
       fetchData();
     } else {
       alert('Error adding ingredient: ' + error.message);
@@ -230,7 +232,7 @@ export default function RecipesPage() {
               <label>Brand</label>
               <select
                 value={newRecipe.brand_id}
-                onChange={e => setNewRecipe({ ...newRecipe, brand_id: e.target.value })}
+                onChange={e => { setNewRecipe({ ...newRecipe, brand_id: e.target.value }); setNewIngredients([{ item_id: '', quantity: 0 }]); }}
               >
                 {brands.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
@@ -261,7 +263,8 @@ export default function RecipesPage() {
                   setNewIngredients(updated);
                 }}
               >
-                {items.map(i => (
+                <option value="">Select item…</option>
+                {itemsForBrand(newRecipe.brand_id).map(i => (
                   <option key={i.id} value={i.id}>{i.name} ({i.uom})</option>
                 ))}
               </select>
@@ -333,7 +336,7 @@ export default function RecipesPage() {
           ) : (
             filteredRecipes.map(recipe => {
               const isExpanded = expandedId === recipe.id;
-              const addState = addIngredientMap[recipe.id] || { item_id: items[0]?.id || '', quantity: 0 };
+              const addState = addIngredientMap[recipe.id] || { item_id: '', quantity: 0 };
 
               return (
                 <div key={recipe.id} className={styles.card}>
@@ -463,7 +466,8 @@ export default function RecipesPage() {
                               }))
                             }
                           >
-                            {items.map(i => (
+                            <option value="">Select item…</option>
+                            {itemsForBrand(recipe.brand_id).map(i => (
                               <option key={i.id} value={i.id}>
                                 {i.name} ({i.uom})
                               </option>

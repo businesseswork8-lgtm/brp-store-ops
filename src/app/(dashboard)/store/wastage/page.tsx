@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import React, { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
 import { WASTAGE_REASONS } from '@/lib/types';
 
@@ -29,14 +31,15 @@ type WastageEntry = {
 };
 
 export default function WastageLogPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
+  const { supabase, store, loading: storeLoading } = useActiveStore();
+  const storeId = store?.id ?? null;
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  
+
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [entries, setEntries] = useState<WastageEntry[]>([]);
-  
+
   const [form, setForm] = useState({
     item_id: '',
     quantity_wasted: '',
@@ -44,54 +47,31 @@ export default function WastageLogPage() {
     reason_notes: '',
     staff_member_id: '',
   });
-  
+
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  const supabase = createClient();
-  const todayDate = new Date().toISOString().split('T')[0];
-  const reasons = WASTAGE_REASONS || ['Spilled', 'Expired', 'Dropped', 'Burnt', 'Other'];
+  const todayDate = istDate();
 
-  useEffect(() => {
-    const init = async () => {
-      let storedStoreId = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
-      if (!storedStoreId) {
-        const { data: stores } = await supabase.from('stores').select('id').order('name');
-        if (stores && stores.length > 0) {
-          storedStoreId = stores[0].id;
-        }
-      }
-      if (!storedStoreId) {
-        setLoading(false);
-        return;
-      }
-      localStorage.setItem('selectedStore', storedStoreId);
-      localStorage.setItem('brp_selected_store', storedStoreId);
-      setStoreId(storedStoreId);
+  const init = useCallback(async () => {
+    if (!store) return;
+    setLoading(true);
+    const [{ data: staffData }, { data: itemsData }] = await Promise.all([
+      supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
+      // Only this store's brand
+      supabase.from('items')
+        .select('id, name, uom, item_categories!inner(brand_id)')
+        .eq('is_active', true)
+        .eq('item_categories.brand_id', store.brand_id)
+        .order('name'),
+    ]);
+    setStaffList(staffData || []);
+    setItems((itemsData || []).map(i => ({ id: i.id, name: i.name, uom: i.uom })));
+    await fetchEntries(store.id);
+    setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, store]);
 
-      try {
-        const { data: staffData } = await supabase
-          .from('staff_members')
-          .select('id, name')
-          .eq('store_id', storedStoreId)
-          .eq('is_active', true);
-        if (staffData) setStaffList(staffData);
-
-        const { data: itemsData } = await supabase
-          .from('items')
-          .select('id, name, uom')
-          .eq('is_active', true)
-          .eq('is_daily_tracked', true);
-        if (itemsData) setItems(itemsData);
-
-        fetchEntries(storedStoreId);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
-  }, [supabase]);
+  useEffect(() => { init(); }, [init]);
 
   const fetchEntries = async (sId: string) => {
     const { data } = await supabase
@@ -114,15 +94,20 @@ export default function WastageLogPage() {
   };
 
   const handleSubmit = async () => {
-    if (!form.item_id || !form.quantity_wasted || !form.reason || !form.staff_member_id) {
+    if (!form.item_id || !form.quantity_wasted || Number(form.quantity_wasted) <= 0 || !form.reason || !form.staff_member_id) {
       showToast('Please fill all required fields', 'error');
+      return;
+    }
+    if (form.reason === 'other' && !form.reason_notes.trim()) {
+      showToast('Please write the reason', 'error');
       return;
     }
     setSubmitting(true);
     
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const profileId = user?.id;
+      if (!user) throw new Error('Session expired. Please log in again.');
+      const profileId = user.id;
 
       const payload = {
         store_id: storeId,
@@ -130,7 +115,7 @@ export default function WastageLogPage() {
         item_id: form.item_id,
         quantity_wasted: Number(form.quantity_wasted),
         reason: form.reason,
-        reason_notes: form.reason === 'Other' ? form.reason_notes : null,
+        reason_notes: form.reason === 'other' ? form.reason_notes.trim() : null,
         staff_member_id: form.staff_member_id,
         submitted_by_profile_id: profileId,
       };
@@ -153,7 +138,8 @@ export default function WastageLogPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this entry?')) return;
     try {
-      await supabase.from('daily_wastage_log').delete().eq('id', id);
+      const { error } = await supabase.from('daily_wastage_log').delete().eq('id', id);
+      if (error) throw error;
       fetchEntries(storeId!);
       showToast('Entry deleted', 'success');
     } catch (error) {
@@ -161,8 +147,8 @@ export default function WastageLogPage() {
     }
   };
 
-  if (loading) return <div className={styles.spinner}></div>;
-  if (!storeId) return <div className={styles.container}>Please select a store.</div>;
+  if (storeLoading || (loading && store)) return <div className={styles.spinner}></div>;
+  if (!storeId) return <div className={styles.container}>No store is assigned to this login. Please contact your manager.</div>;
 
   const selectedItem = items.find(i => i.id === form.item_id);
 
@@ -170,9 +156,7 @@ export default function WastageLogPage() {
     <div className={styles.container}>
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 className={styles.title}>Daily Wastage Log</h1>
-        <a href="/store" style={{ padding: '0.6rem 1.2rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-          ← Back to Operations
-        </a>
+        <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>
 
       <div className={styles.message} style={{ marginBottom: '2rem', textAlign: 'left' }}>
@@ -223,7 +207,7 @@ export default function WastageLogPage() {
             </select>
           </div>
           
-          {form.reason === 'Other' && (
+          {form.reason === 'other' && (
             <div style={{ gridColumn: '1 / -1' }}>
               <label className={styles.statusText}>Notes (Required for Other) *</label>
               <input 
@@ -266,7 +250,7 @@ export default function WastageLogPage() {
                   <td>{entry.items?.name}</td>
                   <td>{entry.quantity_wasted} {entry.items?.uom}</td>
                   <td>
-                    {entry.reason}
+                    {WASTAGE_REASONS.find(r => r.value === entry.reason)?.label || entry.reason}
                     {entry.reason_notes && <span style={{display: 'block', fontSize: '0.8em', color: 'var(--text-secondary)'}}>{entry.reason_notes}</span>}
                   </td>
                   <td>{entry.staff_members?.name}</td>

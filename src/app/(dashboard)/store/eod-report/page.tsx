@@ -1,121 +1,57 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import React, { useCallback, useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
 
 type Store = { id: string; name: string; code: string };
 
 export default function EODReportPage() {
-  const supabase = createClient();
-  const todayDate = new Date().toISOString().split('T')[0];
+  const { supabase, store: activeStore } = useActiveStore();
+  const todayDate = istDate();
 
-  const [activeStore, setActiveStore] = useState<Store | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
   const [loading, setLoading] = useState(true);
 
-  // Data metrics
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [posSales, setPosSales] = useState<any>(null);
   const [morningCash, setMorningCash] = useState<number | null>(null);
   const [eveningCash, setEveningCash] = useState<number | null>(null);
   const [wastageCount, setWastageCount] = useState(0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [varianceAlerts, setVarianceAlerts] = useState<any[]>([]);
 
-  useEffect(() => {
-    loadStoreData();
-
-    const handleStoreChange = () => {
-      loadStoreData();
-    };
-
-    window.addEventListener('storeChange', handleStoreChange);
-    return () => window.removeEventListener('storeChange', handleStoreChange);
-  }, [selectedDate]);
-
-  async function loadStoreData() {
+  const loadStoreData = useCallback(async () => {
+    if (!activeStore) return;
     setLoading(true);
-    let storeId = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
+    const storeId = activeStore.id;
 
-    if (!storeId) {
-      const { data: stores } = await supabase.from('stores').select('id, name, code').order('name');
-      if (stores && stores.length > 0) {
-        storeId = stores[0].id;
-      }
-    }
+    const [{ data: salesData }, { data: cash }, { data: wastage }, { data: rpcData }] = await Promise.all([
+      supabase.from('daily_sales_summary').select('*').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
+      supabase.from('daily_cash_tally').select('tally_type, total_amount').eq('store_id', storeId).eq('entry_date', selectedDate),
+      supabase.from('daily_wastage_log').select('id').eq('store_id', storeId).eq('entry_date', selectedDate),
+      supabase.rpc('calculate_daily_variance', { p_store_id: storeId, p_date: selectedDate }),
+    ]);
 
-    if (storeId) {
-      localStorage.setItem('selectedStore', storeId);
-      localStorage.setItem('brp_selected_store', storeId);
-    }
-
-    if (!storeId) {
-      setLoading(false);
-      return;
-    }
-
-    // Fetch store info
-    const { data: storeData } = await supabase
-      .from('stores')
-      .select('id, name, code')
-      .eq('id', storeId)
-      .single();
-    if (storeData) setActiveStore(storeData);
-
-    // 1. Fetch POS Sales Summary
-    const { data: salesData } = await supabase
-      .from('daily_sales_summary')
-      .select('*')
-      .eq('store_id', storeId)
-      .eq('entry_date', selectedDate)
-      .maybeSingle();
-
-    setPosSales(salesData);
-
-    // 2. Fetch Cash Tallies
-    const { data: mCash } = await supabase
-      .from('daily_cash_tally')
-      .select('total_amount')
-      .eq('store_id', storeId)
-      .eq('entry_date', selectedDate)
-      .eq('tally_type', 'morning')
-      .maybeSingle();
-
-    setMorningCash(mCash ? mCash.total_amount : null);
-
-    const { data: eCash } = await supabase
-      .from('daily_cash_tally')
-      .select('total_amount')
-      .eq('store_id', storeId)
-      .eq('entry_date', selectedDate)
-      .eq('tally_type', 'evening')
-      .maybeSingle();
-
-    setEveningCash(eCash ? eCash.total_amount : null);
-
-    // 3. Fetch Wastage
-    const { data: wastage } = await supabase
-      .from('daily_wastage_log')
-      .select('id')
-      .eq('store_id', storeId)
-      .eq('entry_date', selectedDate);
-
+    setPosSales(salesData && salesData.has_summary !== false ? salesData : null);
+    const m = cash?.find(c => c.tally_type === 'morning');
+    const e = cash?.find(c => c.tally_type === 'evening');
+    setMorningCash(m ? Number(m.total_amount) : null);
+    setEveningCash(e ? Number(e.total_amount) : null);
     setWastageCount(wastage?.length || 0);
-
-    // 4. Fetch Stock Variance
-    const { data: rpcData } = await supabase.rpc('calculate_daily_variance', {
-      p_store_id: storeId,
-      p_date: selectedDate,
-    });
-
-    if (rpcData) {
-      const alerts = (rpcData as any[]).filter(r => r.status === 'EXCEEDED');
-      setVarianceAlerts(alerts);
-    } else {
-      setVarianceAlerts([]);
-    }
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setVarianceAlerts(((rpcData as any[]) || []).filter(r => r.status === 'EXCEEDED'));
     setLoading(false);
-  }
+  }, [supabase, activeStore, selectedDate]);
+
+  useEffect(() => { loadStoreData(); }, [loadStoreData]);
+
+  // Cash check: morning cash + cash sales should equal evening cash
+  const expectedCash = morningCash !== null && posSales ? morningCash + Number(posSales.cash_amount || 0) : null;
+  const cashDiff = expectedCash !== null && eveningCash !== null ? eveningCash - expectedCash : null;
+  const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 
   const formatCurrency = (val: number | null | undefined) => {
     if (val === null || val === undefined) return 'N/A';
@@ -146,9 +82,7 @@ export default function EODReportPage() {
           >
             🖨️ Print / Save PDF
           </button>
-          <a href="/store" style={{ padding: '0.6rem 1.2rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            ← Back to Operations
-          </a>
+          <Link href="/store" className={styles.backLink}>← Back</Link>
         </div>
       </header>
 
@@ -169,6 +103,7 @@ export default function EODReportPage() {
             <input
               type="date"
               value={selectedDate}
+              max={todayDate}
               onChange={e => setSelectedDate(e.target.value)}
               style={{ padding: '0.6rem 1rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
             />
@@ -184,7 +119,7 @@ export default function EODReportPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Section 1: Sales Revenue Summary */}
           <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>1. POS Sales Revenue & Channel Split</h3>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>1. Sales</h3>
             {posSales ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
                 <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
@@ -223,45 +158,81 @@ export default function EODReportPage() {
                 </div>
 
                 <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>🏬 Walk-In Cash</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--success)' }}>
-                    {formatCurrency(posSales.cash_amount)}
-                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>💵 Cash</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{formatCurrency(posSales.cash_amount)}</div>
+                </div>
+
+                <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>📱 UPI</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{formatCurrency(posSales.upi_amount)}</div>
+                </div>
+
+                <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>💳 Card</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{formatCurrency(posSales.card_amount)}</div>
+                </div>
+
+                <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>🧾 Orders</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700 }}>{posSales.total_orders}</div>
                 </div>
               </div>
             ) : (
               <div style={{ padding: '1rem', color: 'var(--warning)', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                ⚠ Rista POS Sales report has not been uploaded for {selectedDate} yet.
+                ⚠ Sales Summary has not been uploaded for {selectedDate} yet.
               </div>
             )}
           </div>
 
           {/* Section 2: Cash Denomination Tallies */}
           <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>2. Cash Register Tally Summary</h3>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>2. Cash Check</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Morning Shift Opening Cash</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Morning cash count</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '0.25rem' }}>
                   {morningCash !== null ? formatCurrency(morningCash) : <span style={{ color: 'var(--warning)', fontSize: '1rem' }}>Pending</span>}
                 </div>
               </div>
 
               <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Evening Shift Closing Cash</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Evening cash count</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '0.25rem' }}>
                   {eveningCash !== null ? formatCurrency(eveningCash) : <span style={{ color: 'var(--warning)', fontSize: '1rem' }}>Pending</span>}
                 </div>
               </div>
             </div>
+
+            <div style={{ marginTop: '1rem', padding: '1rem', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
+              {cashDiff === null ? (
+                <span style={{ color: 'var(--text-secondary)' }}>
+                  Cash check needs: morning count, evening count and the Sales Summary upload.
+                </span>
+              ) : (
+                <>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                    Morning {formatCurrency(morningCash)} + cash sales {formatCurrency(posSales.cash_amount)} = expected {formatCurrency(expectedCash)}
+                  </div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '0.25rem',
+                    color: Math.abs(cashDiff) < 1 ? 'var(--success)' : cashDiff < 0 ? 'var(--danger)' : 'var(--warning)' }}>
+                    {Math.abs(cashDiff) < 1 ? '✓ Cash matches'
+                      : cashDiff < 0 ? `⚠ Short by ${formatCurrency(-cashDiff)}` : `Extra ${formatCurrency(cashDiff)}`}
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                    Note: cash paid out or deposited during the day is not tracked yet.
+                  </div>
+                </>
+              )}
+            </div>
+            <div style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>Wastage entries: {wastageCount}</div>
           </div>
 
           {/* Section 3: Stock Variance & Audit Highlights */}
           <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Raw Material Audit Discrepancies</h3>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Alerts</h3>
             {varianceAlerts.length === 0 ? (
               <div style={{ padding: '1rem', color: 'var(--success)', background: 'rgba(0,200,83,0.1)', borderRadius: '8px' }}>
-                ✓ No inventory leakage or stock consumption alerts detected for {selectedDate}.
+                ✓ No stock alerts for {selectedDate}.
               </div>
             ) : (
               <table className={styles.table}>
@@ -283,8 +254,8 @@ export default function EODReportPage() {
                       <td>{alert.category_name}</td>
                       <td>{alert.actual_consumption} {alert.uom}</td>
                       <td style={{ color: 'var(--accent-primary)' }}>{alert.theoretical_consumption} {alert.uom}</td>
-                      <td style={{ color: 'var(--danger)', fontWeight: 700 }}>+{alert.variance} {alert.uom}</td>
-                      <td style={{ fontWeight: 700 }}>+{alert.variance_percent}%</td>
+                      <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{signed(Number(alert.variance))} {alert.uom}</td>
+                      <td style={{ fontWeight: 700 }}>{alert.variance_percent === null ? 'No sales to explain' : `${signed(Number(alert.variance_percent))}%`}</td>
                       <td>
                         <span className={styles.badgeDanger}>⚠ Exceeded</span>
                       </td>

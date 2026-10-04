@@ -18,7 +18,7 @@ type Item = {
   purchase_unit_qty: number;
   is_daily_tracked: boolean;
   is_active: boolean;
-  item_categories?: { name: string };
+  item_categories?: { name: string; brands?: { name: string } };
 };
 
 export default function ItemsPage() {
@@ -50,12 +50,14 @@ export default function ItemsPage() {
 
   async function fetchData() {
     setLoading(true);
-    const { data: catData } = await supabase.from('item_categories').select('*').order('sort_order');
-    if (catData) setCategories(catData);
+    const { data: catData } = await supabase.from('item_categories').select('*, brands(name)').order('sort_order');
+    // Label categories with their brand so "Batter (99 Pancakes)" can't be confused with a BR category
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (catData) setCategories(catData.map((c: any) => ({ ...c, name: `${c.name} — ${c.brands?.name || 'No brand'}` })));
 
     const { data: itemData } = await supabase
       .from('items')
-      .select('*, item_categories(name)')
+      .select('*, item_categories(name, brands(name))')
       .order('name');
     if (itemData) setItems(itemData);
     setLoading(false);
@@ -274,7 +276,7 @@ export default function ItemsPage() {
                         item.name
                       )}
                     </td>
-                    <td>{item.item_categories?.name || 'Uncategorized'}</td>
+                    <td>{item.item_categories?.name || 'Uncategorized'}{item.item_categories?.brands?.name ? ` — ${item.item_categories.brands.name}` : ''}</td>
                     <td>{item.uom}</td>
                     <td>
                       <span className={item.is_daily_tracked ? styles.badgeSuccess : styles.badgeDefault}>

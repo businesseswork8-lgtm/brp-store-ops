@@ -161,3 +161,24 @@
     transform: translateX(0);
   }
 }
+
+.backdrop {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    z-index: 200;
+  }
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 150;
+  }
+}
+
+@media print {
+  .sidebar, .backdrop { display: none !important; }
+}

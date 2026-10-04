@@ -1,5 +1,6 @@
 'use client';
 
+import { istDate } from '@/lib/dates';
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -47,8 +48,8 @@ export default function HistoricalTrendsPage() {
     const startDate = new Date();
     startDate.setDate(endDate.getDate() - daysRange + 1);
 
-    const startStr = startDate.toISOString().split('T')[0];
-    const endStr = endDate.toISOString().split('T')[0];
+    const startStr = istDate(startDate);
+    const endStr = istDate(endDate);
 
     let query = supabase
       .from('daily_sales_summary')

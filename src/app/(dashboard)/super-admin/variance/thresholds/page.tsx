@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import styles from '../../super-admin.module.css';
 
@@ -37,14 +38,19 @@ export default function VarianceThresholdsPage() {
 
   async function fetchData() {
     setLoading(true);
-    const { data: iData } = await supabase.from('items').select('id, name').order('name');
+    const { data: iRaw } = await supabase.from('items')
+      .select('id, name, item_categories(brands(code))').eq('is_active', true).order('name');
+    // Show the brand next to each item so 99P and BR items can't be confused
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const iData = (iRaw || []).map((i: any) => ({ id: i.id, name: `${i.name} (${i.item_categories?.brands?.code || '?'})` }));
     if (iData) {
       setItems(iData);
       if (iData.length > 0) setTargetId(iData[0].id);
     }
 
-    const { data: cData } = await supabase.from('item_categories').select('id, name').order('name');
-    if (cData) setCategories(cData);
+    const { data: cRaw } = await supabase.from('item_categories').select('id, name, brands(code)').order('name');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setCategories((cRaw || []).map((c: any) => ({ id: c.id, name: `${c.name} (${c.brands?.code || '?'})` })));
 
     const { data: tData } = await supabase
       .from('variance_thresholds')
@@ -64,6 +70,13 @@ export default function VarianceThresholdsPage() {
       setEditingId(null);
       fetchData();
     }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm('Remove this alert limit? The default limit will apply instead.')) return;
+    const { error } = await supabase.from('variance_thresholds').delete().eq('id', id);
+    if (error) alert('Could not delete: ' + error.message);
+    else fetchData();
   }
 
   async function handleCreateThreshold(e: React.FormEvent) {
@@ -98,9 +111,9 @@ export default function VarianceThresholdsPage() {
           <p className={styles.subtitle}>Configure acceptable stock variance % triggers for audit alerts</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <a href="/super-admin/variance" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+          <Link href="/super-admin/variance" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
             ← Back to Variance Audit
-          </a>
+          </Link>
           <button className={styles.primaryButton} onClick={() => setIsAdding(!isAdding)}>
             {isAdding ? 'Cancel' : '+ Add Custom Rule'}
           </button>
@@ -237,6 +250,9 @@ export default function VarianceThresholdsPage() {
                           Edit
                         </button>
                       )}
+                      <button className={styles.secondaryButton} style={{ marginLeft: '0.5rem' }} onClick={() => handleDelete(t.id)}>
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))

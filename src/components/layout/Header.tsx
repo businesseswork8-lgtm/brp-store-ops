@@ -1,97 +1,69 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { usePathname } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
+import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { displayDate } from '@/lib/dates';
 import styles from './Header.module.css';
 
-interface Store {
-  id: string;
-  name: string;
-  code: string;
-}
+const TITLES: Record<string, string> = {
+  '/store': "Today's Tasks",
+  '/store/stock-entry': 'Stock Count',
+  '/store/cash-tally': 'Cash Count',
+  '/store/sales-upload': 'Upload Sales Report',
+  '/store/wastage': 'Wastage',
+  '/store/eod-report': 'Day Summary',
+  '/super-admin': 'All Stores Today',
+  '/super-admin/variance': 'Stock Variance',
+  '/super-admin/variance/thresholds': 'Alert Limits',
+  '/super-admin/recipes': 'Recipes',
+  '/super-admin/items': 'Items',
+  '/super-admin/users': 'Staff & Logins',
+  '/analytics/sales': 'Sales',
+  '/analytics/trends': 'Sales Trends',
+};
+
+// Pages where the store selector doesn't apply
+const NO_STORE_PICKER = ['/super-admin', '/super-admin/recipes', '/super-admin/items', '/super-admin/users',
+  '/super-admin/variance/thresholds', '/analytics/sales', '/analytics/trends'];
 
 export function Header() {
   const pathname = usePathname();
-  const [stores, setStores] = useState<Store[]>([]);
-  const [selectedStore, setSelectedStore] = useState<string>('');
-  const supabase = createClient();
+  const { profile, stores, store, selectStore } = useActiveStore();
 
-  useEffect(() => {
-    const fetchStores = async () => {
-      const { data } = await supabase
-        .from('stores')
-        .select('id, name, code')
-        .order('name');
-      
-      if (data && data.length > 0) {
-        setStores(data);
-        const saved = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
-        if (saved && data.some(s => s.id === saved)) {
-          setSelectedStore(saved);
-        } else {
-          setSelectedStore(data[0].id);
-          localStorage.setItem('selectedStore', data[0].id);
-          localStorage.setItem('brp_selected_store', data[0].id);
-        }
-      }
-    };
-    fetchStores();
-  }, [supabase]);
-
-  const handleStoreChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    setSelectedStore(value);
-    localStorage.setItem('selectedStore', value);
-    localStorage.setItem('brp_selected_store', value);
-    window.dispatchEvent(new Event('storeChange'));
-  };
-
-  const getPageTitle = (path: string) => {
-    if (path === '/' || path === '/store') return 'Daily Store Operations';
-    if (path === '/store/stock-entry') return 'Stock Entry (Opening & Closing)';
-    if (path === '/store/cash-tally') return 'Cash Denomination Tally';
-    if (path === '/store/sales-upload') return 'POS Sales Report Upload';
-    if (path === '/store/wastage') return 'Wastage Log';
-    if (path === '/super-admin/variance') return 'Stock Variance Audit';
-    if (path === '/super-admin/variance/thresholds') return 'Variance Thresholds';
-    if (path === '/super-admin/recipes') return 'Recipe BOM Builder';
-    if (path === '/super-admin/items') return 'Item Master Catalog';
-    if (path === '/super-admin/users') return 'User & Staff Management';
-    if (path === '/analytics/sales') return 'Sales & Revenue Analytics';
-    return 'BRP Operations';
-  };
-
-  const currentDate = new Date().toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
+  const showPicker = !NO_STORE_PICKER.includes(pathname);
+  const singleStore = profile?.role === 'store' || stores.length <= 1;
 
   return (
     <header className={styles.header}>
       <div className={styles.leftSection}>
-        <h2 className={styles.pageTitle}>{getPageTitle(pathname)}</h2>
+        <button
+          className={styles.menuButton}
+          aria-label="Open menu"
+          onClick={() => window.dispatchEvent(new Event('toggleSidebar'))}
+        >
+          ☰
+        </button>
+        <h2 className={styles.pageTitle}>{TITLES[pathname] || 'BRP Operations'}</h2>
       </div>
 
       <div className={styles.rightSection}>
-        <span className={styles.currentDate}>{currentDate}</span>
-        {stores.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Active Store:</span>
-            <select 
-              className={styles.storeSelector} 
-              value={selectedStore} 
-              onChange={handleStoreChange}
+        <span className={styles.currentDate}>{displayDate()}</span>
+        {showPicker && store && (
+          singleStore ? (
+            <span className={styles.storeName}>🏬 {store.name}</span>
+          ) : (
+            <select
+              className={styles.storeSelector}
+              value={store.id}
+              onChange={e => selectStore(e.target.value)}
+              aria-label="Store"
             >
-              {stores.map(store => (
-                <option key={store.id} value={store.id}>
-                  {store.name} ({store.code})
-                </option>
+              {stores.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
-          </div>
+          )
         )}
       </div>
     </header>

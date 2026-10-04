@@ -80,3 +80,29 @@
     display: none;
   }
 }
+
+.menuButton {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border-color, #2a2a3a);
+  color: var(--text-primary, #fff);
+  border-radius: 8px;
+  font-size: 1.2rem;
+  padding: 4px 10px;
+  margin-right: 12px;
+  cursor: pointer;
+}
+
+.storeName {
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+
+@media (max-width: 768px) {
+  .menuButton { display: inline-block; }
+  .currentDate { display: none; }
+}
+
+@media print {
+  .header { display: none !important; }
+}

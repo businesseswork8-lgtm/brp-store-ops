@@ -27,6 +27,7 @@ interface UserProfile {
   role: string;
   store_access: string[];
   is_active: boolean;
+  can_edit?: boolean;
   created_at: string;
 }
 
@@ -65,14 +66,16 @@ export default function UserAndStaffManagementPage() {
     password: '',
     role: 'store',
     store_access: [] as string[],
+    can_edit: false,
   });
 
   // User Profile Edit Mode
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editUserForm, setEditUserForm] = useState<{ full_name: string; role: string; store_access: string[] }>({
+  const [editUserForm, setEditUserForm] = useState<{ full_name: string; role: string; store_access: string[]; can_edit: boolean }>({
     full_name: '',
     role: 'store',
     store_access: [],
+    can_edit: false,
   });
 
   useEffect(() => {
@@ -155,40 +158,41 @@ export default function UserAndStaffManagementPage() {
     e.preventDefault();
     if (!newUser.email || !newUser.password || !newUser.full_name) return;
 
-    // 1. Create Supabase Auth User
-    const { data: authData, error: authErr } = await supabase.auth.signUp({
-      email: newUser.email.trim(),
-      password: newUser.password,
-      options: {
-        data: {
-          full_name: newUser.full_name.trim(),
-        },
-      },
+    // Created on the server (service-role key) so the current Super Admin stays logged in
+    const res = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: newUser.email.trim(),
+        password: newUser.password,
+        full_name: newUser.full_name.trim(),
+        role: newUser.role,
+        store_access: newUser.store_access,
+        can_edit: newUser.can_edit,
+      }),
     });
-
-    if (authErr || !authData.user) {
-      alert('Error creating user login: ' + (authErr?.message || 'Failed'));
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert('Could not create login: ' + (result.error || res.statusText));
       return;
     }
+    setIsAddingUser(false);
+    setNewUser({ full_name: '', email: '', password: '', role: 'store', store_access: [], can_edit: false });
+    fetchData();
+    alert(`Login ${newUser.email} created.`);
+  }
 
-    // 2. Insert or Upsert into profiles table
-    const { error: profileErr } = await supabase.from('profiles').upsert({
-      id: authData.user.id,
-      email: newUser.email.trim(),
-      full_name: newUser.full_name.trim(),
-      role: newUser.role,
-      store_access: newUser.store_access,
-      is_active: true,
+  async function handleToggleUserActive(user: UserProfile) {
+    const turningOff = user.is_active;
+    if (turningOff && !confirm(`Turn off login for ${user.email}? They will not be able to sign in.`)) return;
+    const res = await fetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: user.id, is_active: !user.is_active }),
     });
-
-    if (!profileErr) {
-      setIsAddingUser(false);
-      setNewUser({ full_name: '', email: '', password: '', role: 'store', store_access: [] });
-      fetchData();
-      alert(`User account ${newUser.email} registered successfully!`);
-    } else {
-      alert('Profile error: ' + profileErr.message);
-    }
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok) alert('Could not update login: ' + (result.error || res.statusText));
+    else fetchData();
   }
 
   async function handleSaveUserEdit(userId: string) {
@@ -198,6 +202,7 @@ export default function UserAndStaffManagementPage() {
         full_name: editUserForm.full_name.trim(),
         role: editUserForm.role,
         store_access: editUserForm.store_access,
+        can_edit: editUserForm.role === 'admin' ? editUserForm.can_edit : editUserForm.role === 'super_admin',
       })
       .eq('id', userId);
 
@@ -534,8 +539,24 @@ export default function UserAndStaffManagementPage() {
                 </div>
               </div>
 
+              {newUser.role === 'admin' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={newUser.can_edit}
+                    onChange={e => setNewUser({ ...newUser, can_edit: e.target.checked })}
+                  />
+                  Allowed to edit store entries
+                </label>
+              )}
+              {newUser.role === 'store' && (
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>
+                  A store login must have exactly one store ticked.
+                </p>
+              )}
+
               <button type="submit" className={styles.primaryButton} style={{ marginTop: '1.25rem' }}>
-                Create & Register Account
+                Create Login
               </button>
             </form>
           )}
@@ -585,11 +606,23 @@ export default function UserAndStaffManagementPage() {
                               <option value="admin">Admin</option>
                               <option value="super_admin">Super Admin</option>
                             </select>
-                          ) : (
+                          ) : null}
+                          {isEditing && editUserForm.role === 'admin' && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', marginTop: '0.4rem' }}>
+                              <input
+                                type="checkbox"
+                                checked={editUserForm.can_edit}
+                                onChange={e => setEditUserForm({ ...editUserForm, can_edit: e.target.checked })}
+                              />
+                              Allowed to edit
+                            </label>
+                          )}
+                          {!isEditing && (
                             <span className={`${styles.badge} ${user.role === 'super_admin' ? styles.roleSuperAdmin : user.role === 'admin' ? styles.roleAdmin : styles.roleStore}`}>
-                              {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? 'Admin' : 'Store'}
+                              {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? (user.can_edit ? 'Admin (can edit)' : 'Admin (view only)') : 'Store'}
                             </span>
                           )}
+                          {!user.is_active && <div style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: '0.25rem' }}>Login turned off</div>}
                         </td>
                         <td>
                           {isEditing ? (
@@ -613,7 +646,7 @@ export default function UserAndStaffManagementPage() {
                                   return <span key={sId} className={styles.storeBadge}>{st ? st.name : sId}</span>;
                                 })
                               ) : (
-                                <span className={styles.storeBadge}>All Stores Access</span>
+                                <span className={styles.storeBadge}>{user.role === 'store' ? '⚠ No store linked' : 'All stores'}</span>
                               )}
                             </div>
                           )}
@@ -637,10 +670,16 @@ export default function UserAndStaffManagementPage() {
                                   full_name: user.full_name || '',
                                   role: user.role || 'store',
                                   store_access: user.store_access || [],
+                                  can_edit: Boolean(user.can_edit),
                                 });
                               }}
                             >
-                              Edit Profile & Access
+                              Edit
+                            </button>
+                          )}
+                          {!isEditing && (
+                            <button className={styles.btnSecondary} style={{ marginLeft: '0.5rem' }} onClick={() => handleToggleUserActive(user)}>
+                              {user.is_active ? 'Turn off login' : 'Turn on login'}
                             </button>
                           )}
                         </td>

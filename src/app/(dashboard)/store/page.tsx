@@ -1,107 +1,61 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
+import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { istDate, displayDate } from '@/lib/dates';
 import styles from './store.module.css';
 
 export default function StoreDashboardPage() {
-  const [storeId, setStoreId] = useState<string | null>(null);
-  const [storeName, setStoreName] = useState<string>('');
+  const { supabase, store, loading: storeLoading } = useActiveStore();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState({
     morningTally: false,
     openingStock: false,
     eveningTally: false,
     closingStock: false,
+    salesUpload: false,
+    wastageCount: 0,
   });
 
-  const supabase = createClient();
-  const todayDate = new Date().toISOString().split('T')[0];
-  const displayDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const todayDate = istDate();
 
-  useEffect(() => {
-    const fetchStatus = async () => {
-      let storedStoreId = localStorage.getItem('selectedStore') || localStorage.getItem('brp_selected_store');
-      if (!storedStoreId) {
-        const { data: stores } = await supabase.from('stores').select('id, name').order('name');
-        if (stores && stores.length > 0) {
-          storedStoreId = stores[0].id;
-        }
-      }
-      if (!storedStoreId) {
-        setLoading(false);
-        return;
-      }
-      localStorage.setItem('selectedStore', storedStoreId);
-      localStorage.setItem('brp_selected_store', storedStoreId);
-      setStoreId(storedStoreId);
+  const fetchStatus = useCallback(async () => {
+    if (!store) return;
+    setLoading(true);
+    const [{ data: cash }, { data: stock }, { data: sales }, { data: wastage }] = await Promise.all([
+      supabase.from('daily_cash_tally').select('tally_type').eq('store_id', store.id).eq('entry_date', todayDate),
+      supabase.from('daily_stock_entries').select('closing_stock').eq('store_id', store.id).eq('entry_date', todayDate),
+      supabase.from('daily_sales_summary').select('id').eq('store_id', store.id).eq('entry_date', todayDate).limit(1),
+      supabase.from('daily_wastage_log').select('id').eq('store_id', store.id).eq('entry_date', todayDate),
+    ]);
+    setStatus({
+      morningTally: Boolean(cash?.some(c => c.tally_type === 'morning')),
+      eveningTally: Boolean(cash?.some(c => c.tally_type === 'evening')),
+      openingStock: Boolean(stock && stock.length > 0),
+      closingStock: Boolean(stock && stock.length > 0 && stock.every(e => e.closing_stock !== null)),
+      salesUpload: Boolean(sales && sales.length > 0),
+      wastageCount: wastage?.length || 0,
+    });
+    setLoading(false);
+  }, [supabase, store, todayDate]);
 
-      try {
-        // Get store name
-        const { data: storeData } = await supabase
-          .from('stores')
-          .select('name')
-          .eq('id', storedStoreId)
-          .single();
-        if (storeData) setStoreName(storeData.name);
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-        // Check Morning Cash Tally
-        const { data: morningCash } = await supabase
-          .from('daily_cash_tally')
-          .select('id')
-          .eq('store_id', storedStoreId)
-          .eq('entry_date', todayDate)
-          .eq('tally_type', 'morning')
-          .limit(1);
+  if (storeLoading || (loading && store)) return <div className={styles.spinner}></div>;
 
-        // Check Opening Stock
-        const { data: stockEntries } = await supabase
-          .from('daily_stock_entries')
-          .select('id, opening_stock, closing_stock')
-          .eq('store_id', storedStoreId)
-          .eq('entry_date', todayDate);
-
-        const hasOpeningStock = stockEntries && stockEntries.length > 0;
-        const hasClosingStock = stockEntries && stockEntries.length > 0 && stockEntries.every(entry => entry.closing_stock !== null);
-
-        // Check Evening Cash Tally
-        const { data: eveningCash } = await supabase
-          .from('daily_cash_tally')
-          .select('id')
-          .eq('store_id', storedStoreId)
-          .eq('entry_date', todayDate)
-          .eq('tally_type', 'evening')
-          .limit(1);
-
-        setStatus({
-          morningTally: Boolean(morningCash && morningCash.length > 0),
-          openingStock: Boolean(hasOpeningStock),
-          eveningTally: Boolean(eveningCash && eveningCash.length > 0),
-          closingStock: Boolean(hasClosingStock),
-        });
-      } catch (error) {
-        console.error('Error fetching status:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStatus();
-  }, [supabase, todayDate]);
-
-  if (loading) return <div className={styles.spinner}></div>;
-
-  if (!storeId) {
+  if (!store) {
     return (
       <div className={styles.container}>
         <div className={styles.message}>
-          <h2>No Store Selected</h2>
-          <p>Please select a store from the header to view daily operations.</p>
+          <h2>No store assigned</h2>
+          <p>This login is not linked to a store yet. Please contact your manager.</p>
         </div>
       </div>
     );
   }
+
+  const storeName = store.name;
 
   const tasks = [
     {
@@ -138,24 +92,24 @@ export default function StoreDashboardPage() {
     },
     {
       id: 'sales-upload',
-      title: 'POS Sales Upload',
-      text: 'Upload daily Rista POS CSV export',
-      status: 'optional',
+      title: 'Upload Sales Summary',
+      text: status.salesUpload ? 'Uploaded for today' : 'Pending — upload Rista Sales Summary at night',
+      status: status.salesUpload ? 'completed' : 'pending',
       href: '/store/sales-upload',
-      icon: '📊',
+      icon: status.salesUpload ? '✓' : '!',
     },
     {
       id: 'wastage',
-      title: 'Wastage Log',
-      text: 'Log optional wastage',
+      title: 'Wastage',
+      text: status.wastageCount > 0 ? `${status.wastageCount} logged today` : 'Log anything wasted',
       status: 'optional',
       href: '/store/wastage',
       icon: '♻',
     },
     {
       id: 'eod-report',
-      title: 'EOD Closing Summary',
-      text: 'Generate End-of-Day PDF report',
+      title: 'Day Summary',
+      text: 'View / print today\'s summary',
       status: 'optional',
       href: '/store/eod-report',
       icon: '🖨️',
@@ -167,7 +121,7 @@ export default function StoreDashboardPage() {
       <header className={styles.header}>
         <div>
           <h1 className={styles.title}>{storeName} Operations</h1>
-          <p className={styles.date}>{displayDate}</p>
+          <p className={styles.date}>{displayDate()}</p>
         </div>
       </header>
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { istDate } from '@/lib/dates';
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -19,7 +20,7 @@ type StoreSummary = {
 
 export default function SuperAdminOverviewPage() {
   const supabase = createClient();
-  const todayDate = new Date().toISOString().split('T')[0];
+  const todayDate = istDate();
 
   const [storeSummaries, setStoreSummaries] = useState<StoreSummary[]>([]);
   const [loading, setLoading] = useState(true);

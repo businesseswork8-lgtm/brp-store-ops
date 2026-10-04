@@ -340,3 +340,18 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+.backLink {
+  padding: 0.6rem 1.2rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+@media print {
+  .backLink { display: none; }
+}
