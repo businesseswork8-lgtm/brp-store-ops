@@ -67,7 +67,8 @@ export async function updateSession(request: NextRequest) {
       path.startsWith('/analytics') ||
       path.startsWith('/store') ||
       path === '/super-admin' ||
-      path === '/super-admin/variance'
+      path === '/super-admin/variance' ||
+      path === '/super-admin/flavours'
     )) ||
     (profile.role === 'store' && path.startsWith('/store'))
 

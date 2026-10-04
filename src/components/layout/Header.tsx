@@ -18,6 +18,7 @@ const TITLES: Record<string, string> = {
   '/super-admin/variance/thresholds': 'Alert Limits',
   '/super-admin/recipes': 'Recipes',
   '/super-admin/items': 'Items',
+  '/super-admin/flavours': 'Ice Cream Flavours',
   '/super-admin/users': 'Staff & Logins',
   '/analytics/sales': 'Sales',
   '/analytics/trends': 'Sales Trends',
@@ -25,7 +26,7 @@ const TITLES: Record<string, string> = {
 
 // Pages where the store selector doesn't apply
 const NO_STORE_PICKER = ['/super-admin', '/super-admin/recipes', '/super-admin/items', '/super-admin/users',
-  '/super-admin/variance/thresholds', '/analytics/sales', '/analytics/trends'];
+  '/super-admin/variance/thresholds', '/super-admin/flavours', '/analytics/sales', '/analytics/trends'];
 
 export function Header() {
   const pathname = usePathname();

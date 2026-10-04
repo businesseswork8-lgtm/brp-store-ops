@@ -33,7 +33,10 @@ const reviewLinks: NavLink[] = [
   { href: '/super-admin/variance', label: 'Stock Variance', icon: '🔍' },
 ];
 
+const flavourLink: NavLink = { href: '/super-admin/flavours', label: 'Ice Cream Flavours', icon: '🍨' };
+
 const settingsLinks: NavLink[] = [
+  flavourLink,
   { href: '/super-admin/items', label: 'Items', icon: '🧾' },
   { href: '/super-admin/recipes', label: 'Recipes', icon: '📝' },
   { href: '/super-admin/variance/thresholds', label: 'Alert Limits', icon: '⚙️' },
@@ -54,6 +57,7 @@ function groupsForRole(role: Profile['role']) {
       { group: 'Overview', links: reviewLinks },
       { group: 'Sales', links: analyticsLinks },
       { group: 'Store Work', links: storeLinks },
+      { group: 'Settings', links: [flavourLink] },
     ];
   }
   return [{ group: 'Store Work', links: storeLinks }];

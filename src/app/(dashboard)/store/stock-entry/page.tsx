@@ -10,29 +10,51 @@ type Item = {
   id: string;
   name: string;
   uom: string;
+  sub_category: string | null;
+  tare_grams: number;          // empty tub weight (Baskin Robbins flavours: 100 g)
   item_categories: { name: string; sort_order: number; brand_id: string } | null;
 };
 
+type Mode = 'opening' | 'closing';
+
+// What staff type in. For tub items "qty" is the weight on the scale (tubs included).
+type Entry = { qty: string; tubs: string };
+
 type Row = {
   existsToday: boolean;
-  opening: string;        // what's saved/entered for today's opening
-  closing: string;        // what's saved/entered for today's closing
-  lastClosing: string;    // most recent earlier closing (used to pre-fill opening)
+  opening: Entry;
+  closing: Entry;
 };
 
 type StaffMember = { id: string; name: string };
 
 const toStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
 
+/** Net stock that gets saved: scale weight minus empty tubs. */
+function netOf(item: Item, e: Entry): number | null {
+  if (e.qty === '') return null;
+  const gross = Number(e.qty);
+  if (!item.tare_grams) return gross;
+  return gross - (Number(e.tubs) || 0) * item.tare_grams;
+}
+
+/** Rebuild what the scale showed from a saved net value. */
+function entryFromSaved(item: Item, net: number | null, tubs: number | null): Entry {
+  if (net === null || net === undefined) return { qty: '', tubs: '' };
+  const t = tubs || 0;
+  return { qty: toStr(Number(net) + t * (item.tare_grams || 0)), tubs: item.tare_grams ? toStr(t) : '' };
+}
+
 export default function StockEntryPage() {
   const { supabase, store, loading: storeLoading } = useActiveStore();
-  const [mode, setMode] = useState<'opening' | 'closing'>('opening');
+  const [mode, setMode] = useState<Mode>('opening');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
   const [rows, setRows] = useState<Record<string, Row>>({});
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [selectedStaff, setSelectedStaff] = useState('');
+  const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const today = istDate();
@@ -45,20 +67,23 @@ export default function StockEntryPage() {
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       // Only this store's brand
       supabase.from('items')
-        .select('id, name, uom, item_categories!inner(name, sort_order, brand_id)')
+        .select('id, name, uom, sub_category, tare_grams, item_categories!inner(name, sort_order, brand_id)')
         .eq('is_active', true)
         .eq('is_daily_tracked', true)
         .eq('item_categories.brand_id', store.brand_id),
-      supabase.from('daily_stock_entries').select('item_id, opening_stock, closing_stock')
+      supabase.from('daily_stock_entries')
+        .select('item_id, opening_stock, closing_stock, opening_containers, closing_containers')
         .eq('store_id', store.id).eq('entry_date', today),
-      // Last 14 days to find each item's most recent closing count
-      supabase.from('daily_stock_entries').select('item_id, closing_stock, entry_date')
+      // Most recent earlier closing count per item (pre-fills today's opening)
+      supabase.from('daily_stock_entries').select('item_id, closing_stock, closing_containers, entry_date')
         .eq('store_id', store.id).lt('entry_date', today).not('closing_stock', 'is', null)
         .order('entry_date', { ascending: false }).limit(2000),
     ]);
 
-    const list = ((itemRows || []) as unknown as Item[]).sort((a, b) =>
-      (a.item_categories?.sort_order ?? 999) - (b.item_categories?.sort_order ?? 999) || a.name.localeCompare(b.name));
+    const list = ((itemRows || []) as unknown as Item[])
+      .map(i => ({ ...i, tare_grams: Number(i.tare_grams) || 0 }))
+      .sort((a, b) =>
+        (a.item_categories?.sort_order ?? 999) - (b.item_categories?.sort_order ?? 999) || a.name.localeCompare(b.name));
 
     const map: Record<string, Row> = {};
     list.forEach(item => {
@@ -66,12 +91,11 @@ export default function StockEntryPage() {
       const last = pastRows?.find(r => r.item_id === item.id);
       map[item.id] = {
         existsToday: Boolean(t),
-        opening: t ? toStr(t.opening_stock) : '',
-        closing: t ? toStr(t.closing_stock) : '',
-        lastClosing: last ? toStr(last.closing_stock) : '',
+        opening: t
+          ? entryFromSaved(item, t.opening_stock, t.opening_containers)
+          : last ? entryFromSaved(item, last.closing_stock, last.closing_containers) : { qty: '', tubs: '' },
+        closing: t ? entryFromSaved(item, t.closing_stock, t.closing_containers) : { qty: '', tubs: '' },
       };
-      // Pre-fill opening from last closing if not counted yet today
-      if (!t && last) map[item.id].opening = toStr(last.closing_stock);
     });
 
     setStaffList(staff || []);
@@ -82,8 +106,8 @@ export default function StockEntryPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const setValue = (itemId: string, value: string) => {
-    setRows(prev => ({ ...prev, [itemId]: { ...prev[itemId], [mode]: value } }));
+  const setField = (itemId: string, field: keyof Entry, value: string) => {
+    setRows(prev => ({ ...prev, [itemId]: { ...prev[itemId], [mode]: { ...prev[itemId][mode], [field]: value } } }));
   };
 
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -95,9 +119,14 @@ export default function StockEntryPage() {
     if (!store) return;
     if (!selectedStaff) { showToast('Please select who is counting', 'error'); return; }
 
-    const missing = items.filter(i => rows[i.id]?.[mode] === '');
+    const missing = items.filter(i => rows[i.id]?.[mode].qty === '');
     if (missing.length > 0) {
       showToast(`Please fill all items (${missing.length} empty). Enter 0 if none left.`, 'error');
+      return;
+    }
+    const negative = items.filter(i => (netOf(i, rows[i.id][mode]) ?? 0) < 0);
+    if (negative.length > 0) {
+      showToast(`Check ${negative[0].name}: weight is less than the empty tubs.`, 'error');
       return;
     }
 
@@ -116,14 +145,14 @@ export default function StockEntryPage() {
           staff_member_id: selectedStaff,
           submitted_by_profile_id: user.id,
         };
-        if (mode === 'opening') return { ...base, opening_stock: Number(r.opening) };
-        // Closing for an item with no opening today: use the pre-filled opening
-        return r.existsToday
-          ? { ...base, closing_stock: Number(r.closing) }
-          : { ...base, opening_stock: Number(r.opening || r.lastClosing || 0), closing_stock: Number(r.closing) };
+        const opening = { opening_stock: netOf(item, r.opening) ?? 0, opening_containers: Number(r.opening.tubs) || 0 };
+        const closing = { closing_stock: netOf(item, r.closing) ?? 0, closing_containers: Number(r.closing.tubs) || 0 };
+        if (mode === 'opening') return { ...base, ...opening };
+        // Closing for an item with no opening today: also save the pre-filled opening
+        return r.existsToday ? { ...base, ...closing } : { ...base, ...opening, ...closing };
       });
 
-      // Split: rows that need both fields vs single field, so upsert column sets are consistent
+      // Upsert in groups with identical columns
       const groups = new Map<string, typeof payload>();
       payload.forEach(p => {
         const key = Object.keys(p).sort().join(',');
@@ -148,11 +177,14 @@ export default function StockEntryPage() {
   if (storeLoading || (loading && store)) return <div className={styles.spinner}></div>;
   if (!store) return <div className={styles.container}>No store is assigned to this login. Please contact your manager.</div>;
 
-  const grouped = items.reduce((acc, item) => {
+  const term = search.trim().toLowerCase();
+  const shown = term ? items.filter(i => i.name.toLowerCase().includes(term)) : items;
+  const grouped = shown.reduce((acc, item) => {
     const cat = item.item_categories?.name || 'Other';
     (acc[cat] = acc[cat] || []).push(item);
     return acc;
   }, {} as Record<string, Item[]>);
+  const hasTubs = items.some(i => i.tare_grams > 0);
 
   return (
     <div className={styles.container}>
@@ -170,12 +202,22 @@ export default function StockEntryPage() {
         </button>
       </div>
 
-      <div className={styles.controls}>
+      <div className={styles.controls} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         <select className={styles.select} value={selectedStaff} onChange={e => setSelectedStaff(e.target.value)}>
           <option value="">Who is counting?</option>
           {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
+        {items.length > 12 && (
+          <input className={styles.input} style={{ flex: 1, minWidth: '180px' }} placeholder="Search item…"
+            value={search} onChange={e => setSearch(e.target.value)} />
+        )}
       </div>
+
+      {hasTubs && (
+        <p className={styles.statusText} style={{ marginBottom: '1rem' }}>
+          🍨 Ice cream: put the tub(s) on the scale and enter the <strong>total weight</strong> and <strong>number of tubs</strong>. The empty tub weight is taken off automatically.
+        </p>
+      )}
 
       {items.length === 0 && (
         <p className={styles.statusText}>No items are set up for this store yet.</p>
@@ -188,32 +230,57 @@ export default function StockEntryPage() {
             <div className={styles.itemGrid}>
               {catItems.map(item => {
                 const r = rows[item.id];
-                const value = r?.[mode] ?? '';
-                const opening = r?.opening ?? '';
-                const used = mode === 'closing' && opening !== '' && value !== ''
-                  ? Number(opening) - Number(value) : null;
+                const entry = r?.[mode] ?? { qty: '', tubs: '' };
+                const net = netOf(item, entry);
+                const openingNet = r ? netOf(item, r.opening) : null;
+                const used = mode === 'closing' && openingNet !== null && net !== null ? openingNet - net : null;
+                const tub = item.tare_grams > 0;
 
                 return (
                   <div key={item.id} className={styles.itemRow}>
                     <div className={styles.itemInfo}>
                       <span className={styles.itemName}>{item.name}</span>
-                      <span className={styles.badge}>{item.uom}</span>
+                      <span className={styles.badge}>{tub ? 'g on scale' : item.uom}</span>
                     </div>
                     {mode === 'closing' && (
-                      <div style={{ color: 'var(--text-secondary)' }}>Opening: {opening === '' ? '–' : opening}</div>
+                      <div style={{ color: 'var(--text-secondary)' }}>
+                        Opening: {openingNet === null ? '–' : `${openingNet} ${item.uom}`}
+                      </div>
                     )}
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      className={styles.input}
-                      value={value}
-                      onChange={e => setValue(item.id, e.target.value)}
-                      placeholder={mode === 'opening' ? 'Opening' : 'Closing'}
-                    />
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        className={styles.input}
+                        value={entry.qty}
+                        onChange={e => setField(item.id, 'qty', e.target.value)}
+                        placeholder={tub ? 'Total weight (g)' : mode === 'opening' ? 'Opening' : 'Closing'}
+                        aria-label={`${item.name} ${tub ? 'total weight' : 'quantity'}`}
+                      />
+                      {tub && (
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          step="1"
+                          className={styles.input}
+                          style={{ maxWidth: '90px' }}
+                          value={entry.tubs}
+                          onChange={e => setField(item.id, 'tubs', e.target.value)}
+                          placeholder="Tubs"
+                          aria-label={`${item.name} number of tubs`}
+                        />
+                      )}
+                    </div>
+                    {tub && net !== null && (
+                      <div style={{ color: net < 0 ? 'var(--danger)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                        Ice cream: {net} g{net < 0 ? ' — check weight / tubs' : ''}
+                      </div>
+                    )}
                     {used !== null && (
                       <div style={{ color: used < 0 ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                        Used: {used}{used < 0 ? ' (more than opening — delivery?)' : ''}
+                        Used: {used} {item.uom}{used < 0 ? ' (more than opening — delivery?)' : ''}
                       </div>
                     )}
                   </div>
