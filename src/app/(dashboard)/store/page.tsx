@@ -3,47 +3,57 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate, displayDate } from '@/lib/dates';
+import { istDate, addDays, displayDate } from '@/lib/dates';
+import { Frequency, isDue } from '@/lib/stock/schedule';
 import styles from './store.module.css';
 
-export default function StoreDashboardPage() {
+type Step = { id: string; when: string; title: string; text: string; done: boolean; href: string; icon: string; note?: string };
+
+export default function TonightPage() {
   const { supabase, store, loading: storeLoading } = useActiveStore();
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState({
-    morningTally: false,
-    openingStock: false,
-    eveningTally: false,
-    closingStock: false,
-    salesUpload: false,
-    wastageCount: 0,
+  const [s, setS] = useState({
+    morningCash: false, eveningCash: false,
+    salesUploaded: false, usageUploaded: false,
+    due: 0, counted: 0, received: 0, wasted: 0,
   });
 
-  const todayDate = istDate();
+  const today = istDate();
+  const yesterday = addDays(today, -1);
 
-  const fetchStatus = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!store) return;
     setLoading(true);
-    const [{ data: cash }, { data: stock }, { data: sales }, { data: wastage }] = await Promise.all([
-      supabase.from('daily_cash_tally').select('tally_type').eq('store_id', store.id).eq('entry_date', todayDate),
-      supabase.from('daily_stock_entries').select('closing_stock').eq('store_id', store.id).eq('entry_date', todayDate),
-      supabase.from('daily_sales_summary').select('id').eq('store_id', store.id).eq('entry_date', todayDate).limit(1),
-      supabase.from('daily_wastage_log').select('id').eq('store_id', store.id).eq('entry_date', todayDate),
+    const [{ data: cash }, { data: sales }, { data: usage }, { data: items }, { data: counts }, { data: rec }, { data: wst }] = await Promise.all([
+      supabase.from('daily_cash_tally').select('tally_type').eq('store_id', store.id).eq('entry_date', today),
+      supabase.from('daily_sales_summary').select('has_summary').eq('store_id', store.id).eq('entry_date', yesterday).maybeSingle(),
+      supabase.from('rista_consumption_uploads').select('id').eq('store_id', store.id).lte('date_from', yesterday).gte('date_to', yesterday).limit(1),
+      supabase.from('items').select('id, count_frequency, item_categories!inner(brand_id)')
+        .eq('is_active', true).eq('item_categories.brand_id', store.brand_id).neq('count_frequency', 'none'),
+      supabase.from('stock_counts').select('item_id, count_date').eq('store_id', store.id)
+        .gte('count_date', addDays(today, -62)).order('count_date', { ascending: false }).limit(5000),
+      supabase.from('purchase_orders').select('id').eq('store_id', store.id).eq('entry_date', today),
+      supabase.from('daily_wastage_log').select('id').eq('store_id', store.id).eq('entry_date', today),
     ]);
-    setStatus({
-      morningTally: Boolean(cash?.some(c => c.tally_type === 'morning')),
-      eveningTally: Boolean(cash?.some(c => c.tally_type === 'evening')),
-      openingStock: Boolean(stock && stock.length > 0),
-      closingStock: Boolean(stock && stock.length > 0 && stock.every(e => e.closing_stock !== null)),
-      salesUpload: Boolean(sales && sales.length > 0),
-      wastageCount: wastage?.length || 0,
+    const last: Record<string, string> = {};
+    (counts || []).forEach(c => { if (!last[c.item_id]) last[c.item_id] = c.count_date; });
+    const due = (items || []).filter(i => isDue(i.count_frequency as Frequency, last[i.id] || null, today));
+    setS({
+      morningCash: Boolean(cash?.some(c => c.tally_type === 'morning')),
+      eveningCash: Boolean(cash?.some(c => c.tally_type === 'evening')),
+      salesUploaded: Boolean(sales && sales.has_summary !== false),
+      usageUploaded: Boolean(usage && usage.length),
+      due: due.length,
+      counted: due.filter(i => last[i.id] === today).length,
+      received: rec?.length || 0,
+      wasted: wst?.length || 0,
     });
     setLoading(false);
-  }, [supabase, store, todayDate]);
+  }, [supabase, store, today, yesterday]);
 
-  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+  useEffect(() => { load(); }, [load]);
 
   if (storeLoading || (loading && store)) return <div className={styles.spinner}></div>;
-
   if (!store) {
     return (
       <div className={styles.container}>
@@ -55,111 +65,58 @@ export default function StoreDashboardPage() {
     );
   }
 
-  const storeName = store.name;
-
-  const tasks = [
-    {
-      id: 'morning-tally',
-      title: 'Morning Cash Tally',
-      text: status.morningTally ? 'Completed for today' : 'Pending',
-      status: status.morningTally ? 'completed' : 'pending',
-      href: '/store/cash-tally',
-      icon: status.morningTally ? '✓' : '!',
-    },
-    {
-      id: 'opening-stock',
-      title: 'Opening Stock (Open & Close)',
-      text: status.openingStock ? 'Completed for today' : 'Pending',
-      status: status.openingStock ? 'completed' : 'pending',
-      href: '/store/stock-entry',
-      icon: status.openingStock ? '✓' : '!',
-    },
-    {
-      id: 'stock-count',
-      title: 'Stock Count',
-      text: 'Count the items due tonight (at closing)',
-      status: 'optional',
-      href: '/store/count',
-      icon: '📦',
-    },
-    {
-      id: 'rista-usage',
-      title: 'Upload Rista Usage',
-      text: "Rista \"Consumption Variance\" for yesterday",
-      status: 'optional',
-      href: '/store/rista-usage',
-      icon: '📥',
-    },
-    {
-      id: 'deliveries',
-      title: 'Stock Received',
-      text: 'Add anything that arrived from the warehouse',
-      status: 'optional',
-      href: '/store/deliveries',
-      icon: '🚚',
-    },
-    {
-      id: 'evening-tally',
-      title: 'Evening Cash Tally',
-      text: status.eveningTally ? 'Completed for today' : 'Pending',
-      status: status.eveningTally ? 'completed' : 'pending',
-      href: '/store/cash-tally',
-      icon: status.eveningTally ? '✓' : '!',
-    },
-    {
-      id: 'closing-stock',
-      title: 'Closing Stock (Open & Close)',
-      text: status.closingStock ? 'Completed for today' : 'Pending',
-      status: status.closingStock ? 'completed' : 'pending',
-      href: '/store/stock-entry',
-      icon: status.closingStock ? '✓' : '!',
-    },
-    {
-      id: 'sales-upload',
-      title: 'Upload Sales Summary',
-      text: status.salesUpload ? 'Uploaded for today' : 'Pending — upload Rista Sales Summary at night',
-      status: status.salesUpload ? 'completed' : 'pending',
-      href: '/store/sales-upload',
-      icon: status.salesUpload ? '✓' : '!',
-    },
-    {
-      id: 'wastage',
-      title: 'Wastage',
-      text: status.wastageCount > 0 ? `${status.wastageCount} logged today` : 'Log anything wasted',
-      status: 'optional',
-      href: '/store/wastage',
-      icon: '♻',
-    },
-    {
-      id: 'eod-report',
-      title: 'Day Summary',
-      text: 'View / print today\'s summary',
-      status: 'optional',
-      href: '/store/eod-report',
-      icon: '🖨️',
-    },
+  const steps: Step[] = [
+    { id: 'mcash', when: 'Opening', title: 'Count cash', text: 'Cash in the drawer at opening', done: s.morningCash, href: '/store/cash-tally', icon: '💰' },
+    { id: 'upload', when: 'Opening', title: "Upload yesterday's Rista files", text: 'Sales Summary + Consumption Variance, both for yesterday',
+      done: s.salesUploaded && s.usageUploaded, href: '/store/upload', icon: '📄',
+      note: s.salesUploaded !== s.usageUploaded ? (s.salesUploaded ? 'Consumption Variance still missing' : 'Sales Summary still missing') : undefined },
+    { id: 'count', when: 'Closing', title: 'Count stock', text: s.due ? `${s.counted} of ${s.due} items counted` : 'Nothing due tonight',
+      done: s.due === 0 || s.counted >= s.due, href: '/store/count', icon: '📦' },
+    { id: 'ecash', when: 'Closing', title: 'Count cash', text: 'Cash in the drawer at closing', done: s.eveningCash, href: '/store/cash-tally', icon: '💰' },
   ];
+  const doneCount = steps.filter(x => x.done).length;
 
   return (
     <div className={styles.container}>
       <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>{storeName} Operations</h1>
-          <p className={styles.date}>{displayDate()}</p>
-        </div>
+        <h1 className={styles.title}>{store.name}</h1>
+        <p className={styles.subtitle}>{displayDate()} · {doneCount} of {steps.length} done</p>
       </header>
 
       <div className={styles.statusGrid}>
-        {tasks.map(task => (
-          <Link key={task.id} href={task.href} className={`${styles.statusCard} ${styles[task.status]}`}>
-            <div className={styles.statusIcon}>{task.icon}</div>
+        {steps.map((t, n) => (
+          <Link key={t.id} href={t.href} className={`${styles.statusCard} ${t.done ? styles.completed : styles.pending}`} style={{ textDecoration: 'none' }}>
+            <div className={styles.statusIcon}>{t.done ? '✅' : t.icon}</div>
             <div className={styles.statusContent}>
-              <div className={styles.statusTitle}>{task.title}</div>
-              <div className={styles.statusText}>{task.text}</div>
+              <h3 className={styles.statusTitle}>{n + 1}. {t.title} <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)' }}>· {t.when}</span></h3>
+              <p className={styles.statusText}>{t.text}</p>
+              {t.note && <p className={styles.statusText} style={{ color: 'var(--warning)' }}>{t.note}</p>}
             </div>
           </Link>
         ))}
       </div>
+
+      <h2 className={styles.categoryHeader} style={{ marginTop: '2rem' }}>Whenever it happens</h2>
+      <div className={styles.statusGrid}>
+        <Link href="/store/deliveries" className={`${styles.statusCard} ${styles.optional}`} style={{ textDecoration: 'none' }}>
+          <div className={styles.statusIcon}>🚚</div>
+          <div className={styles.statusContent}>
+            <h3 className={styles.statusTitle}>Stock arrived</h3>
+            <p className={styles.statusText}>{s.received ? `${s.received} entered today` : 'Enter it as soon as it arrives'}</p>
+          </div>
+        </Link>
+        <Link href="/store/wastage" className={`${styles.statusCard} ${styles.optional}`} style={{ textDecoration: 'none' }}>
+          <div className={styles.statusIcon}>🗑️</div>
+          <div className={styles.statusContent}>
+            <h3 className={styles.statusTitle}>Something wasted</h3>
+            <p className={styles.statusText}>{s.wasted ? `${s.wasted} entered today` : 'Spilled, expired or dropped'}</p>
+          </div>
+        </Link>
+      </div>
+
+      <p style={{ marginTop: '2rem' }}>
+        <Link href="/store/eod-report" className={styles.backLink}>🖨️ Day Summary (to print or check)</Link>
+      </p>
     </div>
   );
 }

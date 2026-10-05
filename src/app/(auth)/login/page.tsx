@@ -55,10 +55,10 @@ export default function LoginPage() {
 
         switch (role) {
           case 'super_admin':
-            router.push('/super-admin/variance');
+            router.push('/super-admin');
             break;
           case 'admin':
-            router.push('/analytics/sales');
+            router.push('/super-admin');
             break;
           case 'store':
           default:

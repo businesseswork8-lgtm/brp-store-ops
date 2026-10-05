@@ -7,20 +7,15 @@ import { displayDate } from '@/lib/dates';
 import styles from './Header.module.css';
 
 const TITLES: Record<string, string> = {
-  '/store': "Today's Tasks",
-  '/store/stock-entry': 'Open & Close Count',
-  '/store/count': 'Stock Count',
-  '/store/rista-usage': 'Upload Rista Usage',
-  '/super-admin/stock-report': 'Stock Report',
-  '/store/cash-tally': 'Cash Count',
-  '/store/sales-upload': 'Upload Sales Report',
-  '/store/wastage': 'Wastage',
-  '/store/deliveries': 'Stock Received',
+  '/store': 'Tonight',
+  '/store/count': 'Stock',
+  '/store/deliveries': 'Stock',
+  '/store/wastage': 'Stock',
+  '/store/cash-tally': 'Cash',
+  '/store/upload': 'Upload Rista Files',
   '/store/eod-report': 'Day Summary',
-  '/super-admin': 'All Stores Today',
-  '/super-admin/variance': 'Recipe Variance',
-  '/super-admin/variance/thresholds': 'Alert Limits',
-  '/super-admin/recipes': 'Recipes',
+  '/super-admin': 'All Stores',
+  '/super-admin/stock-report': 'Stock Report',
   '/super-admin/items': 'Items',
   '/super-admin/flavours': 'Ice Cream Flavours',
   '/super-admin/users': 'Staff & Logins',
@@ -29,8 +24,8 @@ const TITLES: Record<string, string> = {
 };
 
 // Pages where the store selector doesn't apply
-const NO_STORE_PICKER = ['/super-admin', '/super-admin/recipes', '/super-admin/items', '/super-admin/users',
-  '/super-admin/variance/thresholds', '/super-admin/flavours', '/analytics/sales', '/analytics/trends'];
+const NO_STORE_PICKER = ['/super-admin', '/super-admin/items', '/super-admin/users',
+  '/super-admin/flavours', '/analytics/sales', '/analytics/trends'];
 
 export function Header() {
   const pathname = usePathname();

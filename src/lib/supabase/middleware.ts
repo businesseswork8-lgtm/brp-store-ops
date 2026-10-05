@@ -57,9 +57,7 @@ export async function updateSession(request: NextRequest) {
     return isAuthPage ? supabaseResponse : redirectTo('/login')
   }
 
-  const home = profile.role === 'super_admin' ? '/super-admin/variance'
-    : profile.role === 'admin' ? '/analytics/sales'
-    : '/store'
+  const home = profile.role === 'store' ? '/store' : '/super-admin'
 
   if (isAuthPage) return redirectTo(home)
 
@@ -71,7 +69,6 @@ export async function updateSession(request: NextRequest) {
       // View-only admins may only read the Day Summary in the store area
       (path.startsWith('/store') && (profile.can_edit || path === '/store/eod-report')) ||
       path === '/super-admin' ||
-      path === '/super-admin/variance' ||
       path === '/super-admin/stock-report' ||
       (path === '/super-admin/items' && profile.can_edit) ||
       path === '/super-admin/flavours'

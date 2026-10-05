@@ -13,58 +13,40 @@ interface Profile {
   can_edit?: boolean;
 }
 
-type NavLink = { href: string; label: string; icon: string };
+type NavLink = { href: string; label: string; icon: string; also?: string[] };
 
+// Store staff: four screens
 const storeLinks: NavLink[] = [
-  { href: '/store', label: 'Today', icon: '📋' },
-  { href: '/store/cash-tally', label: 'Cash Count', icon: '💰' },
-  { href: '/store/count', label: 'Stock Count', icon: '📦' },
-  { href: '/store/stock-entry', label: 'Open & Close Count', icon: '🍨' },
-  { href: '/store/deliveries', label: 'Stock Received', icon: '🚚' },
-  { href: '/store/wastage', label: 'Wastage', icon: '🗑️' },
-  { href: '/store/sales-upload', label: 'Upload Sales Report', icon: '📄' },
-  { href: '/store/rista-usage', label: 'Upload Rista Usage', icon: '📥' },
-  { href: '/store/eod-report', label: 'Day Summary', icon: '🖨️' },
+  { href: '/store', label: 'Tonight', icon: '📋' },
+  { href: '/store/cash-tally', label: 'Cash', icon: '💰' },
+  { href: '/store/count', label: 'Stock', icon: '📦', also: ['/store/deliveries', '/store/wastage'] },
+  { href: '/store/upload', label: 'Upload Rista Files', icon: '📄' },
 ];
+const daySummaryLink: NavLink = { href: '/store/eod-report', label: 'Day Summary', icon: '🖨️' };
 
-const analyticsLinks: NavLink[] = [
-  { href: '/analytics/sales', label: 'Sales', icon: '📊' },
-  { href: '/analytics/trends', label: 'Trends', icon: '📈' },
-];
-
-const reviewLinks: NavLink[] = [
-  { href: '/super-admin', label: 'All Stores Today', icon: '🏬' },
+// Owner: five screens
+const overviewLinks: NavLink[] = [
+  { href: '/super-admin', label: 'All Stores', icon: '🏬' },
   { href: '/super-admin/stock-report', label: 'Stock Report', icon: '📊' },
-  { href: '/super-admin/variance', label: 'Recipe Variance', icon: '🔍' },
+  { href: '/analytics/sales', label: 'Sales', icon: '💹', also: ['/analytics/trends'] },
 ];
-
-const flavourLink: NavLink = { href: '/super-admin/flavours', label: 'Ice Cream Flavours', icon: '🍨' };
-const itemsLink: NavLink = { href: '/super-admin/items', label: 'Items', icon: '🧾' };
-
-const settingsLinks: NavLink[] = [
-  flavourLink,
-  itemsLink,
-  { href: '/super-admin/recipes', label: 'Recipes', icon: '📝' },
-  { href: '/super-admin/variance/thresholds', label: 'Alert Limits', icon: '⚙️' },
-  { href: '/super-admin/users', label: 'Staff & Logins', icon: '👤' },
-];
+const itemsLink: NavLink = { href: '/super-admin/items', label: 'Items', icon: '🧾', also: ['/super-admin/flavours'] };
+const usersLink: NavLink = { href: '/super-admin/users', label: 'Staff & Logins', icon: '👤' };
 
 function groupsForRole(role: Profile['role'], canEdit: boolean) {
   if (role === 'super_admin') {
     return [
-      { group: 'Overview', links: reviewLinks },
-      { group: 'Sales', links: analyticsLinks },
+      { group: 'Overview', links: overviewLinks },
       { group: 'Store Work', links: storeLinks },
-      { group: 'Settings', links: settingsLinks },
+      { group: 'Settings', links: [itemsLink, usersLink] },
     ];
   }
   if (role === 'admin') {
     return [
-      { group: 'Overview', links: reviewLinks },
-      { group: 'Sales', links: analyticsLinks },
+      { group: 'Overview', links: overviewLinks },
       // View-only admins can read the Day Summary but not enter store data
-      { group: 'Store Work', links: canEdit ? storeLinks : storeLinks.filter(l => l.href === '/store/eod-report') },
-      { group: 'Settings', links: canEdit ? [itemsLink, flavourLink] : [flavourLink] },
+      { group: 'Store Work', links: canEdit ? storeLinks : [daySummaryLink] },
+      ...(canEdit ? [{ group: 'Settings', links: [itemsLink] }] : []),
     ];
   }
   return [{ group: 'Store Work', links: storeLinks }];
@@ -133,7 +115,7 @@ export function Sidebar() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`${styles.navLink} ${pathname === link.href ? styles.navLinkActive : ''}`}
+                  className={`${styles.navLink} ${pathname === link.href || link.also?.includes(pathname) ? styles.navLinkActive : ''}`}
                 >
                   <span className={styles.icon}>{link.icon}</span>
                   {link.label}

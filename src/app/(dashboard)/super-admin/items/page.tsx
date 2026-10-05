@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { istDate } from '@/lib/dates';
 import { Frequency, FREQUENCY_LABEL } from '@/lib/stock/schedule';
@@ -75,7 +76,7 @@ export default function ItemsPage() {
   const brandCats = useMemo(() => categories.filter(c => c.brand_id === brandId && !c.is_flavour), [categories, brandId]);
   const brandCatIds = useMemo(() => new Set(categories.filter(c => c.brand_id === brandId).map(c => c.id)), [categories, brandId]);
   const brandStores = stores.filter(s => s.brand_id === brandId);
-  const brandItems = items.filter(i => brandCatIds.has(i.category_id) && i.tare_grams === 0);
+  const brandItems = items.filter(i => brandCatIds.has(i.category_id));
   const catName = (id: string) => categories.find(c => c.id === id)?.name || '';
 
   const visible = brandItems.filter(i =>
@@ -150,7 +151,10 @@ export default function ItemsPage() {
     setRistaLines(parsed.lines
       .filter(l => !linked.has(l.sku) && !/asset/i.test(l.category))
       .map(l => {
-        const same = brandItems.find(i => !i.rista_sku && norm(i.name) === norm(l.name));
+        // Same name, or one name inside the other (e.g. "Mango" ↔ "Mango Ice Cream Bulk")
+        const n = norm(l.name);
+        const same = brandItems.find(i => !i.rista_sku && norm(i.name) === n)
+          || brandItems.find(i => !i.rista_sku && norm(i.name).length >= 4 && (n.includes(norm(i.name)) || norm(i.name).includes(n)));
         return { ...l, pick: false, freq: 'monthly' as Frequency, linkTo: same?.id || '' };
       }));
   };
@@ -215,7 +219,8 @@ export default function ItemsPage() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Items</h1>
-          <p className={styles.subtitle}>What each store counts, how often, and its Rista code and rate for the stock report.</p>
+          <p className={styles.subtitle}>What each store counts, how often, and its Rista code and rate for the stock report.
+            {' '}<Link href="/super-admin/flavours">🍨 Ice cream flavours &amp; box weights →</Link></p>
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>

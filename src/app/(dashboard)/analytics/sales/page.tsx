@@ -150,13 +150,11 @@ export default function SalesAnalyticsPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Sales Revenue & Channel Analytics</h1>
-          <p className={styles.subtitle}>
-            Executive sales performance, order counts, and channel revenue splits (Swiggy vs Zomato vs Walk-In Cash)
-          </p>
+          <h1 className={styles.title}>Sales</h1>
+          <p className={styles.subtitle}>One day&apos;s sales by store and channel.</p>
         </div>
-        <Link href="/store/sales-upload" className={styles.primaryButton}>
-          + Upload POS Sales Report
+        <Link href="/analytics/trends" className={styles.primaryButton}>
+          📈 See trends over time
         </Link>
       </div>
 
@@ -339,7 +337,7 @@ export default function SalesAnalyticsPage() {
                   <td colSpan={9} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
                     No sales reports uploaded for this date.
                     <br />
-                    <Link href="/store/sales-upload" style={{ color: 'var(--accent-primary)', marginTop: '0.5rem', display: 'inline-block' }}>
+                    <Link href="/store/upload" style={{ color: 'var(--accent-primary)', marginTop: '0.5rem', display: 'inline-block' }}>
                       Click here to upload Rista POS CSV report
                     </Link>
                   </td>

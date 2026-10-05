@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { StockTabs } from '@/components/store/StockTabs';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
@@ -156,9 +157,11 @@ export default function WastageLogPage() {
   return (
     <div className={styles.container}>
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className={styles.title}>Daily Wastage Log</h1>
+        <h1 className={styles.title}>Stock</h1>
         <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>
+
+      <StockTabs />
 
       <div className={styles.message} style={{ marginBottom: '2rem', textAlign: 'left' }}>
         <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: '1fr 1fr' }}>

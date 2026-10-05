@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { StockTabs } from '@/components/store/StockTabs';
 import styles from '../store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
@@ -119,9 +120,11 @@ export default function DeliveriesPage() {
   return (
     <div className={styles.container}>
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className={styles.title}>Stock Received</h1>
+        <h1 className={styles.title}>Stock</h1>
         <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>
+
+      <StockTabs />
 
       <p className={styles.statusText} style={{ marginBottom: '1rem' }}>
         Enter everything that arrived from the warehouse today, as soon as it arrives.

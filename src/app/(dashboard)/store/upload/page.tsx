@@ -3,18 +3,25 @@
 import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { parseRistaPOSFile, ParsedPOSReport } from '@/lib/services/rista-parser';
+import { parseConsumption, ParsedConsumption } from '@/lib/stock/rista-consumption';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate, addDays } from '@/lib/dates';
 import styles from './page.module.css';
 
 type Parsed = ParsedPOSReport & { fileName: string };
+type Usage = ParsedConsumption & { fileName: string };
+
+/** Rista "Consumption Variance" = what sales used, per material. */
+const isUsageFile = (name: string, text: string) =>
+  /consumption\s*variance/i.test(name.replace(/_/g, ' ')) || /ideal qty/i.test(text.slice(0, 400));
 
 const inr = (n: number) => `₹ ${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const norm = (s: string | null | undefined) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-export default function SalesUploadPage() {
+export default function UploadPage() {
   const { supabase, store } = useActiveStore();
   const [files, setFiles] = useState<Parsed[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const [itemsDate, setItemsDate] = useState(addDays(istDate(), -1));
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -28,20 +35,29 @@ export default function SalesUploadPage() {
   const readFiles = async (list: FileList | File[]) => {
     setMessage(null);
     const parsed: Parsed[] = [];
-    for (const file of Array.from(list).slice(0, 2)) {
+    let use: Usage | null = null;
+    for (const file of Array.from(list).slice(0, 3)) {
       try {
         const buf = await file.arrayBuffer();
-        parsed.push({ ...parseRistaPOSFile(buf, file.name), fileName: file.name });
+        const head = new TextDecoder().decode(buf.slice(0, 400));
+        if (isUsageFile(file.name, head)) {
+          if (use) { setMessage({ type: 'error', text: 'Please choose only one Consumption Variance file.' }); return; }
+          use = { ...parseConsumption(buf, file.name), fileName: file.name };
+        } else {
+          parsed.push({ ...parseRistaPOSFile(buf, file.name), fileName: file.name });
+        }
       } catch (e) {
         console.error(e);
         setMessage({ type: 'error', text: `Could not read "${file.name}". Is it a Rista CSV/Excel export?` });
+        return;
       }
     }
     if (parsed.filter(p => p.kind === 'summary').length > 1 || parsed.filter(p => p.kind === 'items').length > 1) {
-      setMessage({ type: 'error', text: 'Please select one Sales Summary and/or one Sales By Items file — not two of the same kind.' });
+      setMessage({ type: 'error', text: 'Please choose one file of each kind (Sales Summary, Sales By Items, Consumption Variance).' });
       return;
     }
     setFiles(parsed);
+    setUsage(use);
   };
 
   // ---- validation ----
@@ -62,9 +78,18 @@ export default function SalesUploadPage() {
       problems.push(`The two files don't match: Sales Summary net sales ${inr(summary.summary.net_sales)}, Sales By Items ${inr(items.summary.net_sales)}. They are probably from different days — please download both for the same day.`);
     }
     if (summary?.date && summary.date > istDate()) problems.push('The Sales Summary date is in the future.');
+    if (usage) {
+      problems.push(...usage.warnings.map(w => `${usage.fileName}: ${w}`));
+      if (store.rista_branch_name && usage.branch && norm(usage.branch) !== norm(store.rista_branch_name)) {
+        problems.push(`"${usage.fileName}" is from "${usage.branch}", but this store is ${store.name}.`);
+      } else if (store.rista_branch_name && !usage.branch) {
+        problems.push(`"${usage.fileName}" has been renamed. Please upload it exactly as Rista downloaded it.`);
+      }
+    }
   }
-  const date = summary?.date || (items ? itemsDate : null);
-  const canSave = Boolean(store && files.length && date && problems.length === 0);
+  // The Consumption Variance file has no date in it: it uses the Sales Summary date, or the date picked
+  const date = summary?.date || (items || usage ? itemsDate : null);
+  const canSave = Boolean(store && (files.length || usage) && date && problems.length === 0);
 
   // ---- save ----
   const handleSave = async () => {
@@ -107,9 +132,24 @@ export default function SalesUploadPage() {
         if (error) throw error;
       }
 
-      const what = [summary && 'Sales Summary', items && 'Sales By Items'].filter(Boolean).join(' + ');
+      // 3. Rista usage for the same day
+      if (usage) {
+        const lines = usage.lines.map(l => ({ sku: l.sku, name: l.name, category: l.category, unit: l.unit, ideal_qty: l.ideal_qty, rate: l.rate }));
+        const call = (replace: boolean) => supabase.rpc('save_rista_consumption', {
+          p_store_id: store.id, p_from: date, p_to: date, p_file: usage.fileName, p_lines: lines, p_replace: replace,
+        });
+        let { error } = await call(false);
+        if (error && /OVERLAP/.test(error.message)) {
+          if (!confirm(`Rista usage for ${date} is already uploaded. Replace it with this file?`)) throw new Error('Not saved — usage for this day was already uploaded.');
+          ({ error } = await call(true));
+        }
+        if (error) throw error;
+      }
+
+      const what = [summary && 'Sales Summary', items && 'Sales By Items', usage && 'Rista usage'].filter(Boolean).join(' + ');
       setMessage({ type: 'success', text: `✅ ${what} saved for ${store.name}, ${date}.` });
       setFiles([]);
+      setUsage(null);
       if (inputRef.current) inputRef.current.value = '';
     } catch (err) {
       console.error(err);
@@ -130,9 +170,10 @@ export default function SalesUploadPage() {
     <div className={styles.container}>
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
         <div>
-          <h1 className={styles.title}>Upload Sales Report</h1>
+          <h1 className={styles.title}>Upload Rista Files</h1>
           <p className={styles.subtitle}>
-            In Rista, download <strong>Sales Summary</strong> for the day and upload it here.
+            Every morning, download these two for <strong>yesterday</strong> from Rista and drop both in here together:
+            <br />1. <strong>Sales Summary</strong> &nbsp; 2. <strong>Consumption Variance</strong> (same day)
           </p>
         </div>
         <Link href="/store" className={styles.backLink}>← Back</Link>
@@ -158,10 +199,10 @@ export default function SalesUploadPage() {
         />
         <div style={{ fontSize: '2.5rem' }}>📄</div>
         <h3 style={{ margin: '0.5rem 0' }}>
-          {files.length ? files.map(f => f.fileName).join(', ') : 'Tap to choose file, or drag it here'}
+          {files.length || usage ? [...files.map(f => f.fileName), usage?.fileName].filter(Boolean).join(', ') : 'Tap to choose files, or drag them here'}
         </h3>
         <p className={styles.subtitle} style={{ margin: 0 }}>
-          Sales Summary (daily). Sales By Items can be added too.
+          You can pick both files at once. Sales By Items can be added too.
         </p>
       </div>
 
@@ -175,7 +216,7 @@ export default function SalesUploadPage() {
         </div>
       )}
 
-      {files.length > 0 && (
+      {(files.length > 0 || usage) && (
         <div className={styles.card}>
           <div className={styles.factRow}>
             <div><span className={styles.factLabel}>Store</span><strong>{store.name}</strong></div>
@@ -183,11 +224,12 @@ export default function SalesUploadPage() {
               <span className={styles.factLabel}>Sales date</span>
               {summary?.date ? (
                 <strong>{summary.date}</strong>
-              ) : items ? (
+              ) : items || usage ? (
                 <input type="date" className={styles.dateInput} value={itemsDate} max={istDate()}
                   onChange={e => setItemsDate(e.target.value)} />
               ) : <strong>—</strong>}
             </div>
+            {usage && <div><span className={styles.factLabel}>Rista usage</span><strong>{usage.lines.filter(l => l.ideal_qty !== 0).length} materials used</strong></div>}
             {items && <div><span className={styles.factLabel}>Items sold</span><strong>{items.items.filter(i => i.item_type !== 'Option').length} products</strong></div>}
           </div>
 

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState, useEffect } from 'react';
 import Link from 'next/link';
+import { displayUnit, toDisplay } from '@/lib/stock/units';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
@@ -33,7 +34,7 @@ export default function EODReportPage() {
       supabase.from('daily_sales_summary').select('*').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
       supabase.from('daily_cash_tally').select('tally_type, total_amount').eq('store_id', storeId).eq('entry_date', selectedDate),
       supabase.from('daily_wastage_log').select('id').eq('store_id', storeId).eq('entry_date', selectedDate),
-      supabase.rpc('calculate_daily_variance', { p_store_id: storeId, p_date: selectedDate }),
+      supabase.rpc('stock_variance_report', { p_store_id: storeId, p_from: null, p_to: selectedDate }),
     ]);
 
     setPosSales(salesData && salesData.has_summary !== false ? salesData : null);
@@ -45,11 +46,14 @@ export default function EODReportPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = ((rpcData as any[]) || []);
     setStockError(rpcErr ? rpcErr.message : null);
-    setVarianceAlerts(rows.filter(r => r.status === 'EXCEEDED' || r.status === 'CHECK'));
+    // Items counted on this day, checked against their previous count
+    const today = rows.filter(r => r.closing_date === selectedDate);
+    setVarianceAlerts(today.filter(r => r.status === 'SHORT' || r.status === 'CHECK_RECEIVED'));
+    const incomplete = today.filter(r => ['SALES_DATA_MISSING', 'NO_SKU', 'UNIT_MISMATCH'].includes(r.status)).length;
     setStockNote(
       rpcErr ? null
-      : rows.length === 0 ? 'No completed stock count (opening + closing) for this day, so stock was not checked.'
-      : rows.some(r => r.status === 'NO_SALES_DATA') ? 'Sales By Items has not been uploaded for this day, so usage could not be compared with sales. Only stock that went UP without a delivery is shown.'
+      : today.length === 0 ? 'No stock was counted on this day (or items have no earlier count yet).'
+      : incomplete ? `${incomplete} item(s) can't be checked yet — Rista usage not uploaded for some days, or item not linked to Rista.`
       : null);
     setLoading(false);
   }, [supabase, activeStore, selectedDate, storeLoading]);
@@ -237,43 +241,34 @@ export default function EODReportPage() {
 
           {/* Section 3: Stock Variance & Audit Highlights */}
           <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Alerts</h3>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Short</h3>
             {stockError ? (
               <div style={{ color: 'var(--danger)' }}>Could not check stock: {stockError}</div>
             ) : varianceAlerts.length === 0 ? (
               <div style={{ color: stockNote ? 'var(--text-secondary)' : 'var(--success)' }}>
-                {stockNote || `✓ No stock alerts for ${selectedDate}.`}
+                {stockNote || `✓ Nothing short on ${selectedDate}.`}
               </div>) : (
               <>
               {stockNote && <p style={{ color: 'var(--text-secondary)' }}>{stockNote}</p>}
               <table className={styles.table}>
                 <thead>
-                  <tr>
-                    <th>Item Name</th>
-                    <th>Category</th>
-                    <th>Actual Used</th>
-                    <th>POS Theoretical</th>
-                    <th>Variance</th>
-                    <th>Variance %</th>
-                    <th>Status</th>
-                  </tr>
+                  <tr><th>Item</th><th>Expected</th><th>Counted</th><th>Difference</th><th>₹</th><th>Status</th></tr>
                 </thead>
                 <tbody>
-                  {varianceAlerts.map(alert => (
-                    <tr key={alert.item_id} style={{ background: 'rgba(255,23,68,0.08)' }}>
-                      <td style={{ fontWeight: 600 }}>{alert.item_name}</td>
-                      <td>{alert.category_name}</td>
-                      <td>{alert.actual_consumption} {alert.uom}</td>
-                      <td style={{ color: 'var(--accent-primary)' }}>{alert.theoretical_consumption} {alert.uom}</td>
-                      <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{signed(Number(alert.variance))} {alert.uom}</td>
-                      <td style={{ fontWeight: 700 }}>{alert.variance_percent === null ? (alert.status === 'CHECK' ? 'Stock went up' : 'No sales to explain') : `${signed(Number(alert.variance_percent))}%`}</td>
-                      <td>
-                        {alert.status === 'CHECK'
-                          ? <span className={styles.badgeDanger}>⚠ Check count</span>
-                          : <span className={styles.badgeDanger}>⚠ Used too much</span>}
-                      </td>
-                    </tr>
-                  ))}
+                  {varianceAlerts.map(r => {
+                    const u = displayUnit(r.rista_unit, r.uom);
+                    const d = (q: number) => toDisplay(Number(q), r.rista_unit, r.uom);
+                    return (
+                      <tr key={r.item_id} style={{ background: 'rgba(255,23,68,0.08)' }}>
+                        <td style={{ fontWeight: 600 }}>{r.item_name}</td>
+                        <td>{d(r.system_closing)} {u}</td>
+                        <td>{d(r.actual_closing)} {u}</td>
+                        <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{signed(d(r.variance))} {u}</td>
+                        <td style={{ fontWeight: 700 }}>{r.rate ? `₹${Math.round(Number(r.variance_amount)).toLocaleString('en-IN')}` : '—'}</td>
+                        <td><span className={styles.badgeDanger}>{r.status === 'CHECK_RECEIVED' ? '⚠ Delivery not entered?' : '⚠ Short'}</span></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               </>
