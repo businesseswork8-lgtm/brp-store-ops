@@ -76,13 +76,23 @@ export async function PATCH(request: NextRequest) {
 
   const body = await request.json().catch(() => null)
   const id = String(body?.id || '')
-  const isActive = Boolean(body?.is_active)
   if (!id) return NextResponse.json({ error: 'Missing user id.' }, { status: 400 })
+  const admin = createAdminClient()
+
+  // Set a new password for a login (no email needed)
+  if (typeof body?.password === 'string') {
+    const password = body.password
+    if (password.length < 6) return NextResponse.json({ error: 'Password must be at least 6 characters.' }, { status: 400 })
+    const { error } = await admin.auth.admin.updateUserById(id, { password })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
+
+  const isActive = Boolean(body?.is_active)
   if (id === me.id && !isActive) {
     return NextResponse.json({ error: "You can't deactivate your own login." }, { status: 400 })
   }
 
-  const admin = createAdminClient()
   const { error: profErr } = await admin.from('profiles').update({ is_active: isActive }).eq('id', id)
   if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 })
 

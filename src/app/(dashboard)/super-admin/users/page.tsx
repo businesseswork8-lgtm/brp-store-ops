@@ -184,6 +184,20 @@ export default function UserAndStaffManagementPage() {
     alert(`Login ${newUser.email} created.`);
   }
 
+  async function handleSetPassword(user: UserProfile) {
+    const password = prompt(`New password for ${user.full_name || user.email} (at least 6 characters):`);
+    if (password === null) return;
+    if (password.length < 6) { alert('Password must be at least 6 characters.'); return; }
+    const res = await fetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: user.id, password }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) { alert('Could not change password: ' + (json.error || res.statusText)); return; }
+    alert(`Password changed. Tell ${user.full_name || 'them'} the new password.`);
+  }
+
   async function handleToggleUserActive(user: UserProfile) {
     const turningOff = user.is_active;
     if (turningOff && !confirm(`Turn off login for ${user.email}? They will not be able to sign in.`)) return;
@@ -709,9 +723,14 @@ export default function UserAndStaffManagementPage() {
                             </button>
                           )}
                           {!isEditing && (
+                            <>
+                            <button className={styles.btnSecondary} style={{ marginLeft: '0.5rem' }} onClick={() => handleSetPassword(user)}>
+                              🔑 Set password
+                            </button>
                             <button className={styles.btnSecondary} style={{ marginLeft: '0.5rem' }} onClick={() => handleToggleUserActive(user)}>
                               {user.is_active ? 'Turn off login' : 'Turn on login'}
                             </button>
+                            </>
                           )}
                         </td>
                       </tr>
