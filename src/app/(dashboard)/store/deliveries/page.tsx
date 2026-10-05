@@ -3,19 +3,28 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { StockTabs } from '@/components/store/StockTabs';
+import { displayUnit, fromDisplay, toDisplay } from '@/lib/stock/units';
+
+const MOVES = [
+  { v: 'received', label: 'Received from warehouse' },
+  { v: 'transfer_in', label: 'Transfer IN (from another store)' },
+  { v: 'transfer_out', label: 'Transfer OUT (to another store)' },
+] as const;
+type Move = typeof MOVES[number]['v'];
 import styles from '../store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
 
-type Item = { id: string; name: string; uom: string; tare_grams: number; full_box_grams: number | null };
+type Item = { id: string; name: string; uom: string; tare_grams: number; full_box_grams: number | null; rista_unit: string | null };
 type StaffMember = { id: string; name: string };
 type Delivery = {
   id: string;
   quantity: number;
   boxes: number | null;
+  movement?: string;
   created_at: string;
   po_reference: string | null;
-  items: { name: string; uom: string } | null;
+  items: { name: string; uom: string; rista_unit: string | null } | null;
   staff_members: { name: string } | null;
 };
 
@@ -26,7 +35,7 @@ export default function DeliveriesPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ staff: '', item_id: '', qty: '', note: '' });
+  const [form, setForm] = useState<{ staff: string; item_id: string; qty: string; note: string; move: Move }>({ staff: '', item_id: '', qty: '', note: '', move: 'received' });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const today = istDate();
@@ -39,7 +48,7 @@ export default function DeliveriesPage() {
   const loadDeliveries = useCallback(async (storeId: string) => {
     const { data } = await supabase
       .from('purchase_orders')
-      .select('id, quantity, boxes, created_at, po_reference, items(name, uom), staff_members(name)')
+      .select('id, quantity, boxes, movement, created_at, po_reference, items(name, uom, rista_unit), staff_members(name)')
       .eq('store_id', storeId)
       .eq('entry_date', today)
       .order('created_at', { ascending: false });
@@ -52,13 +61,13 @@ export default function DeliveriesPage() {
     const [{ data: staff }, { data: itemRows }] = await Promise.all([
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       supabase.from('items')
-        .select('id, name, uom, tare_grams, full_box_grams, item_categories!inner(brand_id)')
+        .select('id, name, uom, tare_grams, full_box_grams, rista_unit, item_categories!inner(brand_id)')
         .eq('is_active', true)
         .eq('item_categories.brand_id', store.brand_id)
         .order('name'),
     ]);
     setStaffList(staff || []);
-    setItems((itemRows || []).map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0, full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams) })));
+    setItems((itemRows || []).map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0, full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams), rista_unit: i.rista_unit })));
     await loadDeliveries(store.id);
     setLoading(false);
   }, [supabase, store, loadDeliveries]);
@@ -70,7 +79,7 @@ export default function DeliveriesPage() {
   const box = Boolean(item && item.tare_grams > 0);
   const boxGrams = Number(item?.full_box_grams) || 0;
   const qtyNum = form.qty === '' ? null : Number(form.qty);
-  const net = qtyNum === null ? null : box ? qtyNum * boxGrams : qtyNum;
+  const net = qtyNum === null ? null : box ? qtyNum * boxGrams : item ? fromDisplay(qtyNum, item.rista_unit, item.uom) : qtyNum;
 
   const save = async () => {
     if (!store) return;
@@ -90,6 +99,7 @@ export default function DeliveriesPage() {
         entry_date: today,
         quantity: net,
         boxes: box ? qtyNum : null,
+        movement: form.move,
         supplier_name: 'Warehouse',
         po_reference: form.note.trim() || null,
         staff_member_id: form.staff,
@@ -97,7 +107,7 @@ export default function DeliveriesPage() {
       });
       if (error) throw error;
       showToast(`${item.name}: ${net} ${item.uom} received`, 'success');
-      setForm(f => ({ ...f, item_id: '', qty: '', note: '' }));
+      setForm(f => ({ ...f, item_id: '', qty: '', note: '', move: 'received' }));
       loadDeliveries(store.id);
     } catch (err) {
       console.error(err);
@@ -127,13 +137,19 @@ export default function DeliveriesPage() {
       <StockTabs />
 
       <p className={styles.statusText} style={{ marginBottom: '1rem' }}>
-        Enter everything that arrived from the warehouse today, as soon as it arrives.
+        Enter stock as soon as it arrives — and anything sent to or received from another store.
       </p>
 
       <div className={styles.message} style={{ textAlign: 'left', marginBottom: '2rem' }}>
         <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
           <div>
-            <label className={styles.statusText}>Received by *</label>
+            <label className={styles.statusText}>What happened? *</label>
+            <select className={styles.select} value={form.move} onChange={e => setForm({ ...form, move: e.target.value as Move })}>
+              {MOVES.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={styles.statusText}>Entered by *</label>
             <select className={styles.select} value={form.staff} onChange={e => setForm({ ...form, staff: e.target.value })}>
               <option value="">Who received it?</option>
               {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -148,7 +164,7 @@ export default function DeliveriesPage() {
           </div>
           <div>
             <label className={styles.statusText}>
-              {box ? 'Sealed boxes received *' : `Quantity${item ? ` (${item.uom})` : ''} *`}
+              {box ? 'Sealed boxes *' : `Quantity${item ? ` (${displayUnit(item.rista_unit, item.uom)})` : ''} *`}
             </label>
             <input type="number" inputMode="decimal" min="0" className={styles.input}
               value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="0" />
@@ -180,14 +196,15 @@ export default function DeliveriesPage() {
         ) : (
           <table className={styles.table}>
             <thead>
-              <tr><th>Time</th><th>Item</th><th>Qty</th><th>Received by</th><th>Note</th><th></th></tr>
+              <tr><th>Time</th><th>Item</th><th>Type</th><th>Qty</th><th>By</th><th>Note</th><th></th></tr>
             </thead>
             <tbody>
               {deliveries.map(d => (
                 <tr key={d.id}>
                   <td>{new Date(d.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</td>
                   <td>{d.items?.name}</td>
-                  <td>{d.boxes ? `${d.boxes} box${d.boxes > 1 ? 'es' : ''} = ` : ''}{d.quantity} {d.items?.uom}</td>
+                  <td>{d.movement === 'transfer_out' ? 'Transfer out' : d.movement === 'transfer_in' ? 'Transfer in' : 'Received'}</td>
+                  <td>{d.boxes ? `${d.boxes} box${d.boxes > 1 ? 'es' : ''} = ` : ''}{d.items ? `${toDisplay(Number(d.quantity), d.items.rista_unit, d.items.uom)} ${displayUnit(d.items.rista_unit, d.items.uom)}` : d.quantity}</td>
                   <td>{d.staff_members?.name || '—'}</td>
                   <td>{d.po_reference || ''}</td>
                   <td>

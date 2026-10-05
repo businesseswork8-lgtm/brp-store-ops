@@ -7,6 +7,10 @@ import { istDate } from '@/lib/dates';
 import { Frequency, FREQUENCY_LABEL } from '@/lib/stock/schedule';
 import { displayUnit, fromDisplay, groupForRistaCategory, uomForRistaUnit } from '@/lib/stock/units';
 import { parseConsumption, ConsumptionLine } from '@/lib/stock/rista-consumption';
+import { isMonthEndAudit, parseMonthEndAudit } from '@/lib/stock/audit-files';
+
+type Material = { sku: string; name: string; type: string | null; category: string | null; sub_category: string | null;
+  unit: string | null; rate: number | null; is_critical: boolean; stock_group: string | null };
 import styles from '../super-admin.module.css';
 
 type Brand = { id: string; name: string };
@@ -50,6 +54,9 @@ export default function ItemsPage() {
   const [starting, setStarting] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ name: string; rista_sku: string; rate: string; category_id: string }>({ name: '', rista_sku: '', rate: '', category_id: '' });
+  const [master, setMaster] = useState<Material[]>([]);
+  const [ristaSearch, setRistaSearch] = useState('');
+  const [pickSku, setPickSku] = useState('');
   const [ristaLines, setRistaLines] = useState<(ConsumptionLine & { pick: boolean; freq: Frequency; linkTo: string })[] | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -72,6 +79,15 @@ export default function ItemsPage() {
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadMaster = useCallback(async () => {
+    if (!brandId) return;
+    const { data } = await supabase.from('rista_materials')
+      .select('sku, name, type, category, sub_category, unit, rate, is_critical, stock_group')
+      .eq('brand_id', brandId).order('name').limit(2000);
+    setMaster((data || []) as Material[]);
+  }, [supabase, brandId]);
+  useEffect(() => { loadMaster(); }, [loadMaster]);
 
   const brandCats = useMemo(() => categories.filter(c => c.brand_id === brandId && !c.is_flavour), [categories, brandId]);
   const brandCatIds = useMemo(() => new Set(categories.filter(c => c.brand_id === brandId).map(c => c.id)), [categories, brandId]);
@@ -108,6 +124,9 @@ export default function ItemsPage() {
     if (!name || !form.category_id) { alert('Enter a name and pick a group'); return; }
     if (brandItems.some(i => i.name.toLowerCase() === name.toLowerCase())) { alert('An item with this name already exists'); return; }
     if (form.rista_sku && brandItems.some(i => i.rista_sku === form.rista_sku.trim())) { alert('Another item already uses this Rista SKU'); return; }
+    if (master.length && form.rista_sku.trim() && !master.some(m => m.sku === form.rista_sku.trim())
+      && !confirm(`SKU ${form.rista_sku} is not in the Rista list. Add it anyway?`)) return;
+    if (master.length && !form.rista_sku.trim() && !confirm('This item has no Rista SKU, so its usage can\'t be checked. Add it anyway?')) return;
     const bad = Object.values(starting).find(v => v.trim() !== '' && (isNaN(Number(v)) || Number(v) < 0));
     if (bad !== undefined) { alert('Check the starting stock numbers'); return; }
     setBusy(true);
@@ -124,6 +143,7 @@ export default function ItemsPage() {
     setBusy(false);
     if (sErr) alert('Item added, but starting stock failed: ' + sErr.message);
     setForm({ ...blankForm, category_id: form.category_id });
+    setPickSku('');
     setStarting({});
     setAdding(false);
     load();
@@ -136,6 +156,7 @@ export default function ItemsPage() {
   const saveEdit = async (i: Item) => {
     const sku = edit.rista_sku.trim() || null;
     if (sku && brandItems.some(x => x.id !== i.id && x.rista_sku === sku)) { alert('Another item already uses this Rista SKU'); return; }
+    if (sku && master.length && !master.some(m => m.sku === sku) && !confirm(`SKU ${sku} is not in the Rista list. Save anyway?`)) return;
     const ok = await update(i.id, {
       name: edit.name.trim() || i.name, rista_sku: sku, rate: edit.rate ? Number(edit.rate) : null,
       category_id: edit.category_id, stock_group: groupOf(catName(edit.category_id)),
@@ -143,20 +164,55 @@ export default function ItemsPage() {
     if (ok) setEditing(null);
   };
 
-  // ---- Import from a Rista Consumption Variance file ----
-  const readRista = async (f: File) => {
-    const parsed = parseConsumption(await f.arrayBuffer(), f.name);
-    if (parsed.warnings.length) { alert(parsed.warnings.join('\n')); return; }
+  // ---- Pick from the complete Rista list ----
+  const openRistaList = () => {
     const linked = new Set(brandItems.map(i => i.rista_sku).filter(Boolean));
-    setRistaLines(parsed.lines
-      .filter(l => !linked.has(l.sku) && !/asset/i.test(l.category))
-      .map(l => {
+    setRistaSearch('');
+    setRistaLines(master
+      .filter(m => !linked.has(m.sku) && !/asset/i.test(m.category || ''))
+      .map(m => {
         // Same name, or one name inside the other (e.g. "Mango" ↔ "Mango Ice Cream Bulk")
-        const n = norm(l.name);
+        const n = norm(m.name);
         const same = brandItems.find(i => !i.rista_sku && norm(i.name) === n)
           || brandItems.find(i => !i.rista_sku && norm(i.name).length >= 4 && (n.includes(norm(i.name)) || norm(i.name).includes(n)));
-        return { ...l, pick: false, freq: 'monthly' as Frequency, linkTo: same?.id || '' };
+        return {
+          sku: m.sku, name: m.name, type: m.type || '', category: m.category || '', sub_category: m.sub_category || '',
+          unit: m.unit || 'Nos', ideal_qty: 0, rate: m.rate,
+          pick: false, freq: (m.is_critical ? 'daily' : 'monthly') as Frequency, linkTo: same?.id || '',
+        };
       }));
+  };
+
+  /** Refresh the Rista list from a Consumption Variance or month-end audit file (adds new SKUs, updates names and rates). */
+  const updateRistaList = async (f: File) => {
+    const buf = await f.arrayBuffer();
+    const head = new TextDecoder().decode(buf.slice(0, 400));
+    const rows = isMonthEndAudit(head)
+      ? parseMonthEndAudit(buf).lines.map(l => ({ sku: l.sku, name: l.name, type: l.type, category: l.category, sub_category: l.sub_category,
+          unit: l.unit, perishable: l.perishable, stock_group: l.stock_group }))
+      : parseConsumption(buf, f.name).lines.map(l => ({ sku: l.sku, name: l.name, type: l.type, category: l.category, sub_category: l.sub_category,
+          unit: l.unit, rate: l.rate, stock_group: groupForRistaCategory(l.category, l.sub_category) }));
+    if (!rows.length) { alert('No items found. Use a Rista "Consumption Variance" or month-end audit file.'); return; }
+    setBusy(true);
+    const { data, error } = await supabase.rpc('refresh_rista_materials', { p_brand: brandId, p_rows: rows });
+    setBusy(false);
+    if (error) { alert('Could not update: ' + error.message); return; }
+    alert(`Rista list updated: ${data} items. Rates of linked items were updated too.`);
+    loadMaster();
+    load();
+  };
+
+  /** Fill the add form from a Rista list entry. */
+  const pickMaterial = (sku: string) => {
+    setPickSku(sku);
+    const m = master.find(x => x.sku === sku);
+    if (!m) return;
+    const group = m.stock_group || groupForRistaCategory(m.category || '', m.sub_category || '');
+    setForm(f => ({
+      ...f, name: m.name, rista_sku: m.sku, rista_unit: m.unit && RISTA_UNITS.includes(m.unit) ? m.unit : (/kg|g/i.test(m.unit || '') ? 'kg' : 'Nos'),
+      rate: m.rate?.toString() || '', category_id: categoryForGroup(group) || f.category_id,
+      count_frequency: m.is_critical ? 'daily' : f.count_frequency,
+    }));
   };
 
   const categoryForGroup = (group: string) => {
@@ -174,7 +230,7 @@ export default function ItemsPage() {
     // 1. Link existing items
     for (const l of picked.filter(l => l.linkTo)) {
       const { error } = await supabase.from('items').update({
-        rista_sku: l.sku, rista_unit: l.unit, rate: l.rate, count_frequency: l.freq,
+        rista_sku: l.sku, rista_unit: l.unit, rate: l.rate, count_frequency: l.freq, name: l.name, is_active: true,
         stock_group: groupForRistaCategory(l.category, l.sub_category),
       }).eq('id', l.linkTo);
       if (error) { setBusy(false); alert(`Could not link ${l.name}: ${error.message}`); return; }
@@ -224,11 +280,12 @@ export default function ItemsPage() {
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <label className={styles.secondaryButton}>
-              📄 Add from Rista file
+            <label className={styles.secondaryButton} title="Upload a Rista Consumption Variance or month-end audit file to add new SKUs and update rates">
+              🔄 Update Rista list
               <input type="file" accept=".csv,.xlsx" style={{ display: 'none' }}
-                onChange={e => { if (e.target.files?.[0]) readRista(e.target.files[0]); e.target.value = ''; }} />
+                onChange={e => { if (e.target.files?.[0]) updateRistaList(e.target.files[0]); e.target.value = ''; }} />
             </label>
+            <button className={styles.secondaryButton} onClick={openRistaList} disabled={!master.length}>📚 Add from Rista list ({master.length})</button>
             <button className={styles.primaryButton} onClick={() => setAdding(a => !a)}>{adding ? 'Cancel' : '+ Add item'}</button>
           </div>
         )}
@@ -253,6 +310,18 @@ export default function ItemsPage() {
       {adding && (
         <div className={styles.card} style={{ marginBottom: '1rem' }}>
           <h3 style={{ marginTop: 0 }}>Add item</h3>
+          {master.length > 0 && (
+            <div className={styles.fieldGroup} style={{ marginBottom: '1rem' }}>
+              <label>Pick from the Rista list (fills everything in — no typing mistakes)</label>
+              <input className={styles.input} list="rista-materials" placeholder="Type a name or SKU…" value={pickSku}
+                onChange={e => { const v = e.target.value; const m = master.find(x => x.sku === v || `${x.name} (${x.sku})` === v); if (m) pickMaterial(m.sku); else setPickSku(v); }} />
+              <datalist id="rista-materials">
+                {master.filter(m => !brandItems.some(i => i.rista_sku === m.sku)).map(m => (
+                  <option key={m.sku} value={`${m.name} (${m.sku})`} />
+                ))}
+              </datalist>
+            </div>
+          )}
           <div className={styles.formGrid}>
             <div className={styles.fieldGroup}><label>Name *</label>
               <input className={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Nutella" /></div>
@@ -290,18 +359,19 @@ export default function ItemsPage() {
       {ristaLines && (
         <div className={styles.card} style={{ marginBottom: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <h3 style={{ margin: 0 }}>From the Rista file: {ristaLines.length} items not in the app yet</h3>
+            <h3 style={{ margin: 0 }}>Rista list: {ristaLines.length} items not tracked yet</h3>
+            <input className={styles.searchInput} style={{ minWidth: 200 }} placeholder="Search…" value={ristaSearch} onChange={e => setRistaSearch(e.target.value)} />
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button className={styles.secondaryButton} onClick={() => setRistaLines(null)}>Cancel</button>
               <button className={styles.primaryButton} onClick={importPicked} disabled={busy}>{busy ? 'Saving…' : `Add ${ristaLines.filter(l => l.pick).length} ticked`}</button>
             </div>
           </div>
-          <p className={styles.subtitle}>Tick what you want to track. Where an app item has the same name, it gets linked instead of added twice.</p>
+          <p className={styles.subtitle}>Tick what you want to track. Items on the company audit&apos;s critical list are set to Daily. Where an app item has the same name, it gets linked instead of added twice.</p>
           <div style={{ overflowX: 'auto' }}>
             <table className={styles.table}>
               <thead><tr><th></th><th>Rista item</th><th>SKU</th><th>Unit</th><th>Rate ₹</th><th>Group</th><th>Count</th><th>Link to existing</th></tr></thead>
               <tbody>
-                {ristaLines.map((l, idx) => (
+                {ristaLines.map((l, idx) => (!ristaSearch.trim() || `${l.name} ${l.sku}`.toLowerCase().includes(ristaSearch.toLowerCase())) && (
                   <tr key={l.sku}>
                     <td><input type="checkbox" checked={l.pick} onChange={e => setRistaLines(ls => ls!.map((x, j) => j === idx ? { ...x, pick: e.target.checked } : x))} /></td>
                     <td>{l.name}</td><td>{l.sku}</td><td>{l.unit}</td><td>{l.rate ?? '—'}</td>

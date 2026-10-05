@@ -6,6 +6,7 @@ import { istDate, addDays } from '@/lib/dates';
 import { FREQUENCY_LABEL, Frequency } from '@/lib/stock/schedule';
 import { displayUnit, toDisplay } from '@/lib/stock/units';
 import styles from '../super-admin.module.css';
+import { CompanyTally } from './CompanyTally';
 
 type Row = {
   item_id: string; item_name: string; stock_group: string; uom: string; rista_unit: string | null;
@@ -32,7 +33,8 @@ const fmt = (ymd: string) => new Date(ymd + 'T00:00:00Z').toLocaleDateString('en
 const groupKey = (g: string) => (GROUPS.includes(g) ? g : /pack/i.test(g) ? 'Packaging' : /cake|pastr/i.test(g) ? 'Cakes & Pastries' : /misc|other/i.test(g) ? 'Other' : 'Raw Material');
 
 export default function StockReportPage() {
-  const { supabase, store } = useActiveStore();
+  const { supabase, store, profile } = useActiveStore();
+  const [showTally, setShowTally] = useState(false);
   const [mode, setMode] = useState<'latest' | 'range'>('latest');
   const [from, setFrom] = useState(addDays(istDate(), -30));
   const [to, setTo] = useState(istDate());
@@ -83,7 +85,10 @@ export default function StockReportPage() {
             Expected stock = last count + received − wastage − used by sales (Rista). Variance = actual count − expected. Same method as the company audit.
           </p>
         </div>
-        <button className={styles.secondaryButton} onClick={() => window.print()}>🖨️ Print</button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className={showTally ? styles.primaryButton : styles.secondaryButton} onClick={() => setShowTally(v => !v)}>🏢 Company audit</button>
+          <button className={styles.secondaryButton} onClick={() => window.print()}>🖨️ Print</button>
+        </div>
       </div>
 
       <div className={styles.card} style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'end' }}>
@@ -108,6 +113,11 @@ export default function StockReportPage() {
           <input type="checkbox" checked={onlyProblems} onChange={e => setOnlyProblems(e.target.checked)} /> Only problems
         </label>
       </div>
+
+      {showTally && store && (
+        <CompanyTally supabase={supabase} store={store}
+          canEdit={profile?.role === 'super_admin' || (profile?.role === 'admin' && Boolean(profile?.can_edit))} />
+      )}
 
       {error && <div className={styles.card} style={{ color: 'var(--danger)', marginBottom: '1rem' }}>Could not load: {error}</div>}
 

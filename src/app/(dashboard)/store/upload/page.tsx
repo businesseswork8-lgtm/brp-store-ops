@@ -4,12 +4,14 @@ import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { parseRistaPOSFile, ParsedPOSReport } from '@/lib/services/rista-parser';
 import { parseConsumption, ParsedConsumption } from '@/lib/stock/rista-consumption';
+import { isMonthEndAudit, parseMonthEndAudit, AuditLine } from '@/lib/stock/audit-files';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate, addDays } from '@/lib/dates';
 import styles from './page.module.css';
 
 type Parsed = ParsedPOSReport & { fileName: string };
 type Usage = ParsedConsumption & { fileName: string };
+type MonthEnd = { lines: AuditLine[]; warnings: string[]; fileName: string };
 
 /** Rista "Consumption Variance" = what sales used, per material. */
 const isUsageFile = (name: string, text: string) =>
@@ -22,6 +24,9 @@ export default function UploadPage() {
   const { supabase, store } = useActiveStore();
   const [files, setFiles] = useState<Parsed[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [audit, setAudit] = useState<MonthEnd | null>(null);
+  const [usageFrom, setUsageFrom] = useState(addDays(istDate(), -1));
+  const [auditDate, setAuditDate] = useState(istDate());
   const [itemsDate, setItemsDate] = useState(addDays(istDate(), -1));
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,11 +41,14 @@ export default function UploadPage() {
     setMessage(null);
     const parsed: Parsed[] = [];
     let use: Usage | null = null;
+    let aud: MonthEnd | null = null;
     for (const file of Array.from(list).slice(0, 3)) {
       try {
         const buf = await file.arrayBuffer();
         const head = new TextDecoder().decode(buf.slice(0, 400));
-        if (isUsageFile(file.name, head)) {
+        if (isMonthEndAudit(head)) {
+          aud = { ...parseMonthEndAudit(buf), fileName: file.name };
+        } else if (isUsageFile(file.name, head)) {
           if (use) { setMessage({ type: 'error', text: 'Please choose only one Consumption Variance file.' }); return; }
           use = { ...parseConsumption(buf, file.name), fileName: file.name };
         } else {
@@ -58,6 +66,7 @@ export default function UploadPage() {
     }
     setFiles(parsed);
     setUsage(use);
+    setAudit(aud);
   };
 
   // ---- validation ----
@@ -88,12 +97,14 @@ export default function UploadPage() {
     }
   }
   // The Consumption Variance file has no date in it: it uses the Sales Summary date, or the date picked
+  if (audit) problems.push(...audit.warnings.map(w => `${audit.fileName}: ${w}`));
+  if (usage && !summary && usageFrom > itemsDate) problems.push('Rista usage: "From" date is after the "To" date.');
   const date = summary?.date || (items || usage ? itemsDate : null);
-  const canSave = Boolean(store && (files.length || usage) && date && problems.length === 0);
+  const canSave = Boolean(store && (files.length || usage || audit) && (date || audit) && problems.length === 0);
 
   // ---- save ----
   const handleSave = async () => {
-    if (!store || !date) return;
+    if (!store || (!date && !audit)) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -136,7 +147,7 @@ export default function UploadPage() {
       if (usage) {
         const lines = usage.lines.map(l => ({ sku: l.sku, name: l.name, category: l.category, unit: l.unit, ideal_qty: l.ideal_qty, rate: l.rate }));
         const call = (replace: boolean) => supabase.rpc('save_rista_consumption', {
-          p_store_id: store.id, p_from: date, p_to: date, p_file: usage.fileName, p_lines: lines, p_replace: replace,
+          p_store_id: store.id, p_from: summary ? date : usageFrom, p_to: date, p_file: usage.fileName, p_lines: lines, p_replace: replace,
         });
         let { error } = await call(false);
         if (error && /OVERLAP/.test(error.message)) {
@@ -146,10 +157,23 @@ export default function UploadPage() {
         if (error) throw error;
       }
 
-      const what = [summary && 'Sales Summary', items && 'Sales By Items', usage && 'Rista usage'].filter(Boolean).join(' + ');
-      setMessage({ type: 'success', text: `✅ ${what} saved for ${store.name}, ${date}.` });
+      // 4. Month-end audit = full stock count on the audit date
+      let auditNote = '';
+      if (audit) {
+        const { data, error } = await supabase.rpc('save_full_count', {
+          p_store_id: store.id, p_date: auditDate,
+          p_lines: audit.lines.map(l => ({ sku: l.sku, qty: l.qty, unit: l.unit })),
+        });
+        if (error) throw error;
+        const r = data as { saved: number; in_file: number };
+        auditNote = ` Month-end count saved for ${r.saved} tracked items (${r.in_file - r.saved} in the file aren't tracked in the app).`;
+      }
+
+      const what = [summary && 'Sales Summary', items && 'Sales By Items', usage && 'Rista usage', audit && 'Month-end audit'].filter(Boolean).join(' + ');
+      setMessage({ type: 'success', text: `✅ ${what} saved for ${store.name}${date ? `, ${date}` : ''}.${auditNote}` });
       setFiles([]);
       setUsage(null);
+      setAudit(null);
       if (inputRef.current) inputRef.current.value = '';
     } catch (err) {
       console.error(err);
@@ -199,10 +223,10 @@ export default function UploadPage() {
         />
         <div style={{ fontSize: '2.5rem' }}>📄</div>
         <h3 style={{ margin: '0.5rem 0' }}>
-          {files.length || usage ? [...files.map(f => f.fileName), usage?.fileName].filter(Boolean).join(', ') : 'Tap to choose files, or drag them here'}
+          {files.length || usage || audit ? [...files.map(f => f.fileName), usage?.fileName, audit?.fileName].filter(Boolean).join(', ') : 'Tap to choose files, or drag them here'}
         </h3>
         <p className={styles.subtitle} style={{ margin: 0 }}>
-          You can pick both files at once. Sales By Items can be added too.
+          You can pick both files at once. Month-end: the Rista audit file goes here too.
         </p>
       </div>
 
@@ -216,19 +240,36 @@ export default function UploadPage() {
         </div>
       )}
 
-      {(files.length > 0 || usage) && (
+      {(files.length > 0 || usage || audit) && (
         <div className={styles.card}>
           <div className={styles.factRow}>
             <div><span className={styles.factLabel}>Store</span><strong>{store.name}</strong></div>
-            <div>
-              <span className={styles.factLabel}>Sales date</span>
+            {(summary || items || usage) && <div>
+              <span className={styles.factLabel}>{summary || items ? 'Sales date' : 'Rista usage dates'}</span>
               {summary?.date ? (
                 <strong>{summary.date}</strong>
+              ) : usage && !items ? (
+                <span>
+                  <input type="date" className={styles.dateInput} value={usageFrom} max={itemsDate}
+                    onChange={e => setUsageFrom(e.target.value)} aria-label="Usage from" />
+                  {' to '}
+                  <input type="date" className={styles.dateInput} value={itemsDate} max={istDate()}
+                    onChange={e => setItemsDate(e.target.value)} aria-label="Usage to" />
+                  <span className={styles.subtitle} style={{ display: 'block', margin: 0 }}>Same dates you chose in Rista</span>
+                </span>
               ) : items || usage ? (
                 <input type="date" className={styles.dateInput} value={itemsDate} max={istDate()}
                   onChange={e => setItemsDate(e.target.value)} />
               ) : <strong>—</strong>}
-            </div>
+            </div>}
+            {audit && (
+              <div>
+                <span className={styles.factLabel}>Month-end count date</span>
+                <input type="date" className={styles.dateInput} value={auditDate} max={istDate()}
+                  onChange={e => setAuditDate(e.target.value)} />
+                <span className={styles.subtitle} style={{ display: 'block', margin: 0 }}>{audit.lines.length} items in the file</span>
+              </div>
+            )}
             {usage && <div><span className={styles.factLabel}>Rista usage</span><strong>{usage.lines.filter(l => l.ideal_qty !== 0).length} materials used</strong></div>}
             {items && <div><span className={styles.factLabel}>Items sold</span><strong>{items.items.filter(i => i.item_type !== 'Option').length} products</strong></div>}
           </div>
