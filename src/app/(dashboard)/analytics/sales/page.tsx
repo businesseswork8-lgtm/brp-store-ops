@@ -1,6 +1,6 @@
 'use client';
 
-import { istDate } from '@/lib/dates';
+import { istDate, addDays } from '@/lib/dates';
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -44,7 +44,7 @@ export default function SalesAnalyticsPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(
-    istDate()
+    addDays(istDate(), -1) // the Sales Summary is uploaded at night, so yesterday is the latest full day
   );
   
   const [salesData, setSalesData] = useState<DailySalesSummary[]>([]);
@@ -85,19 +85,26 @@ export default function SalesAnalyticsPage() {
       
       const { data, error } = await query;
       if (!error && data) {
-        setSalesData(data as any);
+        // Days with only a Sales By Items upload have no money split — leave them out of totals
+        setSalesData((data as any[]).filter(d => d.has_summary !== false));
 
         // Fetch top selling itemized products if summary exists
         if (data.length > 0) {
           const summaryIds = data.map(d => d.id);
           const { data: itemData } = await supabase
             .from('daily_sales_items')
-            .select('id, item_name, quantity_sold, total_price')
-            .in('sales_summary_id', summaryIds)
-            .order('quantity_sold', { ascending: false })
-            .limit(10);
+            .select('id, item_name, quantity_sold, total_price, item_type')
+            .in('sales_summary_id', summaryIds);
 
-          if (itemData) setTopItems(itemData);
+          // Combine the same product across stores; combo contents ("Option") are not products sold
+          const byName = new Map<string, SalesItem>();
+          (itemData || []).filter(i => (i.item_type || 'Item') !== 'Option').forEach(i => {
+            const cur = byName.get(i.item_name) || { id: i.item_name, item_name: i.item_name, quantity_sold: 0, total_price: 0 };
+            cur.quantity_sold += Number(i.quantity_sold || 0);
+            cur.total_price += Number(i.total_price || 0);
+            byName.set(i.item_name, cur);
+          });
+          setTopItems(Array.from(byName.values()).sort((a, b) => b.quantity_sold - a.quantity_sold).slice(0, 10));
         } else {
           setTopItems([]);
         }
@@ -123,11 +130,11 @@ export default function SalesAnalyticsPage() {
   };
 
   // Summary Totals
-  const totalNet = salesData.reduce((acc, curr) => acc + (curr.net_sales || 0), 0);
-  const totalGross = salesData.reduce((acc, curr) => acc + (curr.gross_sales || 0), 0);
-  const totalDiscount = salesData.reduce((acc, curr) => acc + (curr.total_discount || 0), 0);
-  const totalSwiggy = salesData.reduce((acc, curr) => acc + (curr.swiggy_amount || 0), 0);
-  const totalZomato = salesData.reduce((acc, curr) => acc + (curr.zomato_amount || 0), 0);
+  const totalNet = salesData.reduce((acc, curr) => acc + Number(curr.net_sales || 0), 0);
+  const totalGross = salesData.reduce((acc, curr) => acc + Number(curr.gross_sales || 0), 0);
+  const totalDiscount = salesData.reduce((acc, curr) => acc + Number(curr.total_discount || 0), 0);
+  const totalSwiggy = salesData.reduce((acc, curr) => acc + Number(curr.swiggy_amount || 0), 0);
+  const totalZomato = salesData.reduce((acc, curr) => acc + Number(curr.zomato_amount || 0), 0);
   const totalCash = salesData.reduce((acc, curr) => acc + Number(curr.cash_amount || 0), 0);
   const totalUpi = salesData.reduce((acc, curr) => acc + Number(curr.upi_amount || 0), 0);
   const totalCard = salesData.reduce((acc, curr) => acc + Number(curr.card_amount || 0), 0);

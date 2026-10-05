@@ -32,7 +32,7 @@ const recipeMatches = (r: Recipe, si: SoldItem) =>
   r.rista_sku ? r.rista_sku === si.sku : r.product_name.trim().toLowerCase() === si.item_name.trim().toLowerCase();
 
 export default function VarianceDashboardPage() {
-  const { supabase, store } = useActiveStore();
+  const { supabase, store, profile } = useActiveStore();
   const [selectedDate, setSelectedDate] = useState<string>(addDays(istDate(), -1));
   const [varianceData, setVarianceData] = useState<VarianceRow[]>([]);
   const [unmatched, setUnmatched] = useState<SoldItem[]>([]);
@@ -110,7 +110,8 @@ export default function VarianceDashboardPage() {
   }
 
   // Summary KPIs
-  const alertsCount = varianceData.filter(r => r.status === 'EXCEEDED').length;
+  const alertsCount = varianceData.filter(r => r.status === 'EXCEEDED' || r.status === 'CHECK').length;
+  const noItemSales = varianceData.some(r => r.status === 'NO_SALES_DATA');
 
   return (
     <div className={styles.container}>
@@ -121,9 +122,11 @@ export default function VarianceDashboardPage() {
             Stock actually used vs. what sales say should have been used. Change store from the top bar.
           </p>
         </div>
-        <Link href="/super-admin/variance/thresholds" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
+        {profile?.role === 'super_admin' && (
+          <Link href="/super-admin/variance/thresholds" className={styles.secondaryButton} style={{ textDecoration: 'none' }}>
           ⚙️ Alert Limits
         </Link>
+        )}
       </div>
 
       {/* Control Bar */}
@@ -193,6 +196,13 @@ export default function VarianceDashboardPage() {
         </div>
       )}
 
+      {noItemSales && (
+        <div className={styles.card} style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
+          ℹ️ Sales By Items is not uploaded for {selectedDate}, so usage can&apos;t be compared with sales. Only &quot;Check count&quot; (stock went up with no delivery) is flagged.
+          Upload Sales By Items for this day to see the full check.
+        </div>
+      )}
+
       {varianceData.some(r => r.status === 'INFO') && (
         <div className={styles.card} style={{ marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
           🍨 Ice cream is checked as one total (&quot;All ice cream&quot;) against scoops and packs sold.
@@ -236,7 +246,7 @@ export default function VarianceDashboardPage() {
                   <tr
                     key={row.item_id}
                     style={{
-                      background: row.status === 'EXCEEDED' ? 'rgba(255, 23, 68, 0.08)' : undefined,
+                      background: row.status === 'EXCEEDED' || row.status === 'CHECK' ? 'rgba(255, 23, 68, 0.08)' : undefined,
                     }}
                   >
                     <td style={{ fontWeight: 600 }}>{row.item_name}</td>
@@ -250,21 +260,25 @@ export default function VarianceDashboardPage() {
                     </td>
                     <td>{row.wastage}</td>
                     <td
-                      style={row.status === 'INFO' ? { color: 'var(--text-secondary)' } : {
+                      style={row.status === 'INFO' || row.status === 'NO_SALES_DATA' ? { color: 'var(--text-secondary)' } : {
                         fontWeight: 700,
                         color: Number(row.variance) > 0 ? 'var(--danger)' : Number(row.variance) < 0 ? 'var(--success)' : 'inherit',
                       }}
                     >
-                      {Number(row.variance) > 0 ? `+${row.variance}` : row.variance} {row.uom}
+                      {row.status === 'NO_SALES_DATA' ? '–' : <>{Number(row.variance) > 0 ? `+${row.variance}` : row.variance} {row.uom}</>}
                     </td>
                     <td style={{ fontWeight: 600 }}>
-                      {row.status === 'INFO' ? '–' : row.variance_percent === null
-                        ? (Number(row.variance) > 0 ? 'No sales to explain' : '–')
+                      {row.status === 'INFO' || row.status === 'NO_SALES_DATA' ? '–' : row.variance_percent === null
+                        ? (Number(row.variance) > 0 ? 'No sales to explain' : Number(row.variance) < 0 ? 'Stock went up' : '–')
                         : Number(row.variance_percent) > 0 ? `+${row.variance_percent}%` : `${row.variance_percent}%`}
                     </td>
                     <td>
-                      <span className={row.status === 'EXCEEDED' ? styles.badgeDanger : row.status === 'INFO' ? styles.badgeDefault : styles.badgeSuccess}>
-                        {row.status === 'EXCEEDED' ? '⚠ Exceeded' : row.status === 'INFO' ? 'Usage only' : '✓ OK'}
+                      <span className={row.status === 'EXCEEDED' || row.status === 'CHECK' ? styles.badgeDanger
+                        : row.status === 'INFO' || row.status === 'NO_SALES_DATA' ? styles.badgeDefault : styles.badgeSuccess}>
+                        {row.status === 'EXCEEDED' ? '⚠ Used too much'
+                          : row.status === 'CHECK' ? '⚠ Check count'
+                          : row.status === 'INFO' ? 'Usage only'
+                          : row.status === 'NO_SALES_DATA' ? 'No item sales' : '✓ OK'}
                       </span>
                     </td>
                     <td>

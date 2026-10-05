@@ -22,7 +22,7 @@ type Item = {
 };
 
 export default function ItemsPage() {
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
 
   const [items, setItems] = useState<Item[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -100,6 +100,7 @@ export default function ItemsPage() {
       .eq('id', item.id);
 
     if (!error) fetchData();
+    else alert('Could not update item: ' + error.message);
   }
 
   async function handleSaveEdit(id: string) {
@@ -116,6 +117,8 @@ export default function ItemsPage() {
     if (!error) {
       setEditingId(null);
       fetchData();
+    } else {
+      alert('Could not save item: ' + error.message);
     }
   }
 

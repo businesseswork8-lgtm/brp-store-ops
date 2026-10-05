@@ -35,7 +35,7 @@ export default function LoginPage() {
         // Fetch user profile to get role
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
-          .select('role')
+          .select('role, is_active')
           .eq('id', authData.user.id)
           .single();
 
@@ -44,6 +44,11 @@ export default function LoginPage() {
           // Fallback to store if error
           router.push('/store');
           return;
+        }
+
+        if (profileData && profileData.is_active === false) {
+          await supabase.auth.signOut();
+          throw new Error('banned');
         }
 
         const role = profileData?.role;

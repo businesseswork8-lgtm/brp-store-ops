@@ -32,7 +32,8 @@ interface UserProfile {
 }
 
 export default function UserAndStaffManagementPage() {
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
+  const [myId, setMyId] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'staff' | 'users'>('staff');
   const [stores, setStores] = useState<Store[]>([]);
@@ -86,6 +87,8 @@ export default function UserAndStaffManagementPage() {
 
   async function fetchData() {
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    setMyId(user?.id || null);
 
     const [storesRes, staffRes, profilesRes] = await Promise.all([
       supabase.from('stores').select('id, name, code, brands(name)').order('name'),
@@ -132,6 +135,7 @@ export default function UserAndStaffManagementPage() {
       .eq('id', staff.id);
 
     if (!error) fetchData();
+    else alert('Could not update staff member: ' + error.message);
   }
 
   async function handleSaveStaffEdit(staffId: string) {
@@ -146,13 +150,9 @@ export default function UserAndStaffManagementPage() {
     if (!error) {
       setEditingStaffId(null);
       fetchData();
+    } else {
+      alert('Could not save staff member: ' + error.message);
     }
-  }
-
-  async function handleDeleteStaff(staffId: string) {
-    if (!confirm('Are you sure you want to delete this staff member?')) return;
-    const { error } = await supabase.from('staff_members').delete().eq('id', staffId);
-    if (!error) fetchData();
   }
 
   // --- USER PROFILE HANDLERS ---
@@ -198,6 +198,15 @@ export default function UserAndStaffManagementPage() {
   }
 
   async function handleSaveUserEdit(userId: string) {
+    if (editUserForm.role === 'store' && editUserForm.store_access.length !== 1) {
+      alert('A store login must be linked to exactly one store.');
+      return;
+    }
+    const current = userProfiles.find(u => u.id === userId);
+    if (userId === myId && current && current.role !== editUserForm.role) {
+      alert("You can't change your own role. Ask another Super Admin.");
+      return;
+    }
     const { error } = await supabase
       .from('profiles')
       .update({
@@ -440,9 +449,6 @@ export default function UserAndStaffManagementPage() {
                               </button>
                               <button className={styles.btnSecondary} onClick={() => handleToggleStaffActive(staff)}>
                                 {staff.is_active ? 'Deactivate' : 'Activate'}
-                              </button>
-                              <button className={styles.btnSecondary} style={{ color: 'var(--danger)' }} onClick={() => handleDeleteStaff(staff.id)}>
-                                Delete
                               </button>
                             </div>
                           )}

@@ -5,44 +5,48 @@ import Link from 'next/link';
 import styles from '../store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
+import { BoxEntry, boxEntryEmpty, boxEntryFromSaved, boxNet, isBoxItem } from '@/lib/icecream';
 
 type Item = {
   id: string;
   name: string;
   uom: string;
   sub_category: string | null;
-  tare_grams: number;          // empty tub weight (Baskin Robbins flavours: 100 g)
+  tare_grams: number;          // empty box weight (Baskin Robbins flavours: 100 g)
+  full_box_grams: number | null; // ice cream in one sealed box
   item_categories: { name: string; sort_order: number; brand_id: string } | null;
 };
 
 type Mode = 'opening' | 'closing';
 
-// What staff type in. For tub items "qty" is the weight on the scale (tubs included).
-type Entry = { qty: string; tubs: string };
-
-type Row = {
-  existsToday: boolean;
-  opening: Entry;
-  closing: Entry;
-};
-
+/** What staff type in. Normal items use qty; ice cream uses unopened boxes + open box weight. */
+type Entry = { qty: string } & BoxEntry;
+type Row = { existsToday: boolean; opening: Entry; closing: Entry };
 type StaffMember = { id: string; name: string };
 
+const blank = (): Entry => ({ qty: '', unopened: '', openGross: '' });
 const toStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
 
-/** Net stock that gets saved: scale weight minus empty tubs. */
-function netOf(item: Item, e: Entry): number | null {
-  if (e.qty === '') return null;
-  const gross = Number(e.qty);
-  if (!item.tare_grams) return gross;
-  return gross - (Number(e.tubs) || 0) * item.tare_grams;
+function isEmpty(item: Item, e: Entry) {
+  return isBoxItem(item) ? boxEntryEmpty(e) : e.qty.trim() === '';
 }
 
-/** Rebuild what the scale showed from a saved net value. */
-function entryFromSaved(item: Item, net: number | null, tubs: number | null): Entry {
-  if (net === null || net === undefined) return { qty: '', tubs: '' };
-  const t = tubs || 0;
-  return { qty: toStr(Number(net) + t * (item.tare_grams || 0)), tubs: item.tare_grams ? toStr(t) : '' };
+/** Net stock that gets saved, or an error to show. */
+function netOf(item: Item, e: Entry): { value: number | null; error: string | null } {
+  if (isBoxItem(item)) {
+    const r = boxNet(item, e);
+    return { value: r.grams, error: r.error };
+  }
+  if (e.qty.trim() === '') return { value: null, error: null };
+  const n = Number(e.qty);
+  if (isNaN(n) || n < 0) return { value: null, error: `${item.name}: check the quantity` };
+  return { value: n, error: null };
+}
+
+function entryFromSaved(item: Item, net: number | null, unopened: number | null, openGross: number | null): Entry {
+  if (net === null || net === undefined) return blank();
+  if (isBoxItem(item)) return { qty: '', ...boxEntryFromSaved(unopened, openGross) };
+  return { qty: toStr(Number(net)), unopened: '', openGross: '' };
 }
 
 export default function StockEntryPage() {
@@ -64,21 +68,26 @@ export default function StockEntryPage() {
     if (!store) return;
     setLoading(true);
 
+    // Last day before today that has a closing count (pre-fills today's opening)
+    const { data: lastDay } = await supabase.from('daily_stock_entries').select('entry_date')
+      .eq('store_id', store.id).lt('entry_date', today).not('closing_stock', 'is', null)
+      .order('entry_date', { ascending: false }).limit(1).maybeSingle();
+
     const [{ data: staff }, { data: itemRows }, { data: todayRows }, { data: pastRows }, { data: deliveryRows }] = await Promise.all([
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       // Only this store's brand
       supabase.from('items')
-        .select('id, name, uom, sub_category, tare_grams, item_categories!inner(name, sort_order, brand_id)')
+        .select('id, name, uom, sub_category, tare_grams, full_box_grams, item_categories!inner(name, sort_order, brand_id)')
         .eq('is_active', true)
         .eq('is_daily_tracked', true)
         .eq('item_categories.brand_id', store.brand_id),
       supabase.from('daily_stock_entries')
-        .select('item_id, opening_stock, closing_stock, opening_containers, closing_containers')
+        .select('item_id, opening_stock, closing_stock, opening_containers, closing_containers, opening_open_gross, closing_open_gross')
         .eq('store_id', store.id).eq('entry_date', today),
-      // Most recent earlier closing count per item (pre-fills today's opening)
-      supabase.from('daily_stock_entries').select('item_id, closing_stock, closing_containers, entry_date')
-        .eq('store_id', store.id).lt('entry_date', today).not('closing_stock', 'is', null)
-        .order('entry_date', { ascending: false }).limit(2000),
+      lastDay
+        ? supabase.from('daily_stock_entries').select('item_id, closing_stock, closing_containers, closing_open_gross')
+            .eq('store_id', store.id).eq('entry_date', lastDay.entry_date).not('closing_stock', 'is', null)
+        : Promise.resolve({ data: [] as { item_id: string; closing_stock: number; closing_containers: number; closing_open_gross: number | null }[] }),
       // Deliveries received today
       supabase.from('purchase_orders').select('item_id, quantity')
         .eq('store_id', store.id).eq('entry_date', today),
@@ -100,9 +109,9 @@ export default function StockEntryPage() {
       map[item.id] = {
         existsToday: Boolean(t),
         opening: t
-          ? entryFromSaved(item, t.opening_stock, t.opening_containers)
-          : last ? entryFromSaved(item, last.closing_stock, last.closing_containers) : { qty: '', tubs: '' },
-        closing: t ? entryFromSaved(item, t.closing_stock, t.closing_containers) : { qty: '', tubs: '' },
+          ? entryFromSaved(item, t.opening_stock, t.opening_containers, t.opening_open_gross)
+          : last ? entryFromSaved(item, last.closing_stock, last.closing_containers, last.closing_open_gross) : blank(),
+        closing: t ? entryFromSaved(item, t.closing_stock, t.closing_containers, t.closing_open_gross) : blank(),
       };
     });
 
@@ -120,22 +129,30 @@ export default function StockEntryPage() {
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), 4000);
   };
 
   const handleSubmit = async () => {
     if (!store) return;
     if (!selectedStaff) { showToast('Please select who is counting', 'error'); return; }
 
-    const missing = items.filter(i => rows[i.id]?.[mode].qty === '');
+    const missing = items.filter(i => isEmpty(i, rows[i.id][mode]));
     if (missing.length > 0) {
-      showToast(`Please fill all items (${missing.length} empty). Enter 0 if none left.`, 'error');
+      showToast(`Please fill all items (${missing.length} empty, e.g. ${missing[0].name}). Enter 0 if none left.`, 'error');
       return;
     }
-    const negative = items.filter(i => (netOf(i, rows[i.id][mode]) ?? 0) < 0);
-    if (negative.length > 0) {
-      showToast(`Check ${negative[0].name}: weight is less than the empty tubs.`, 'error');
-      return;
+    // Closing needs an opening for the same day
+    if (mode === 'closing') {
+      const noOpening = items.filter(i => !rows[i.id].existsToday && isEmpty(i, rows[i.id].opening));
+      if (noOpening.length > 0) {
+        showToast(`Opening stock was not counted for ${noOpening[0].name}${noOpening.length > 1 ? ` and ${noOpening.length - 1} more` : ''}. Save Opening first.`, 'error');
+        return;
+      }
+    }
+    for (const i of items) {
+      const errs = [netOf(i, rows[i.id][mode]).error, mode === 'closing' && !rows[i.id].existsToday ? netOf(i, rows[i.id].opening).error : null];
+      const err = errs.find(Boolean);
+      if (err) { showToast(err, 'error'); return; }
     }
 
     setSubmitting(true);
@@ -146,6 +163,7 @@ export default function StockEntryPage() {
       // Only send the column being counted, so opening never overwrites closing and vice versa.
       const payload = items.map(item => {
         const r = rows[item.id];
+        const box = isBoxItem(item);
         const base = {
           store_id: store.id,
           item_id: item.id,
@@ -153,11 +171,17 @@ export default function StockEntryPage() {
           staff_member_id: selectedStaff,
           submitted_by_profile_id: user.id,
         };
-        const opening = { opening_stock: netOf(item, r.opening) ?? 0, opening_containers: Number(r.opening.tubs) || 0 };
-        const closing = { closing_stock: netOf(item, r.closing) ?? 0, closing_containers: Number(r.closing.tubs) || 0 };
-        if (mode === 'opening') return { ...base, ...opening };
-        // Closing for an item with no opening today: also save the pre-filled opening
-        return r.existsToday ? { ...base, ...closing } : { ...base, ...opening, ...closing };
+        const part = (m: Mode) => {
+          const e = r[m];
+          return {
+            [`${m}_stock`]: netOf(item, e).value ?? 0,
+            [`${m}_containers`]: box ? Number(e.unopened) || 0 : 0,
+            [`${m}_open_gross`]: box ? Number(e.openGross) || 0 : null,
+          };
+        };
+        if (mode === 'opening') return { ...base, ...part('opening') };
+        // Closing for an item with no row today: also save the pre-filled opening
+        return r.existsToday ? { ...base, ...part('closing') } : { ...base, ...part('opening'), ...part('closing') };
       });
 
       // Upsert in groups with identical columns
@@ -176,7 +200,10 @@ export default function StockEntryPage() {
       load();
     } catch (err) {
       console.error(err);
-      showToast(err instanceof Error ? err.message : 'Could not save. Please try again.', 'error');
+      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message || '';
+      showToast(/row-level security/i.test(msg)
+        ? 'This day is closed for changes. Ask your manager to correct it.'
+        : msg || 'Could not save. Please try again.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -192,7 +219,7 @@ export default function StockEntryPage() {
     (acc[cat] = acc[cat] || []).push(item);
     return acc;
   }, {} as Record<string, Item[]>);
-  const hasTubs = items.some(i => i.tare_grams > 0);
+  const hasBoxes = items.some(isBoxItem);
 
   return (
     <div className={styles.container}>
@@ -221,9 +248,10 @@ export default function StockEntryPage() {
         )}
       </div>
 
-      {hasTubs && (
+      {hasBoxes && (
         <p className={styles.statusText} style={{ marginBottom: '1rem' }}>
-          🍨 Ice cream: put the tub(s) on the scale and enter the <strong>total weight</strong> and <strong>number of tubs</strong>. The empty tub weight is taken off automatically.
+          🍨 Ice cream: enter the number of <strong>unopened boxes</strong>, and put the <strong>open box</strong> on the scale and enter its weight in grams.
+          The empty box (100 g) is taken off automatically. No open box? Leave the weight blank.
         </p>
       )}
 
@@ -238,18 +266,18 @@ export default function StockEntryPage() {
             <div className={styles.itemGrid}>
               {catItems.map(item => {
                 const r = rows[item.id];
-                const entry = r?.[mode] ?? { qty: '', tubs: '' };
-                const net = netOf(item, entry);
-                const openingNet = r ? netOf(item, r.opening) : null;
+                const entry = r?.[mode] ?? blank();
+                const box = isBoxItem(item);
+                const { value: net, error } = netOf(item, entry);
+                const openingNet = r ? netOf(item, r.opening).value : null;
                 const got = received[item.id] || 0;
                 const used = mode === 'closing' && openingNet !== null && net !== null ? openingNet + got - net : null;
-                const tub = item.tare_grams > 0;
 
                 return (
                   <div key={item.id} className={styles.itemRow}>
                     <div className={styles.itemInfo}>
                       <span className={styles.itemName}>{item.name}</span>
-                      <span className={styles.badge}>{tub ? 'g on scale' : item.uom}</span>
+                      <span className={styles.badge}>{box ? 'grams' : item.uom}</span>
                     </div>
                     {mode === 'closing' && (
                       <div style={{ color: 'var(--text-secondary)' }}>
@@ -257,35 +285,38 @@ export default function StockEntryPage() {
                         {got > 0 && <> · Received: {got} {item.uom}</>}
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {box ? (
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <input
+                          type="number" inputMode="numeric" min="0" step="1"
+                          className={styles.input} style={{ maxWidth: '120px' }}
+                          value={entry.unopened}
+                          onChange={e => setField(item.id, 'unopened', e.target.value)}
+                          placeholder="Unopened boxes"
+                          aria-label={`${item.name} unopened boxes`}
+                        />
+                        <input
+                          type="number" inputMode="decimal" min="0"
+                          className={styles.input}
+                          value={entry.openGross}
+                          onChange={e => setField(item.id, 'openGross', e.target.value)}
+                          placeholder="Open box on scale (g)"
+                          aria-label={`${item.name} open box weight`}
+                        />
+                      </div>
+                    ) : (
                       <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
+                        type="number" inputMode="decimal" min="0"
                         className={styles.input}
                         value={entry.qty}
                         onChange={e => setField(item.id, 'qty', e.target.value)}
-                        placeholder={tub ? 'Total weight (g)' : mode === 'opening' ? 'Opening' : 'Closing'}
-                        aria-label={`${item.name} ${tub ? 'total weight' : 'quantity'}`}
+                        placeholder={mode === 'opening' ? 'Opening' : 'Closing'}
+                        aria-label={`${item.name} quantity`}
                       />
-                      {tub && (
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min="0"
-                          step="1"
-                          className={styles.input}
-                          style={{ maxWidth: '90px' }}
-                          value={entry.tubs}
-                          onChange={e => setField(item.id, 'tubs', e.target.value)}
-                          placeholder="Tubs"
-                          aria-label={`${item.name} number of tubs`}
-                        />
-                      )}
-                    </div>
-                    {tub && net !== null && (
-                      <div style={{ color: net < 0 ? 'var(--danger)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                        Ice cream: {net} g{net < 0 ? ' — check weight / tubs' : ''}
+                    )}
+                    {box && (error || net !== null) && (
+                      <div style={{ color: error ? 'var(--danger)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                        {error || `Ice cream: ${net} g`}
                       </div>
                     )}
                     {used !== null && (

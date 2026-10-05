@@ -355,3 +355,19 @@
 @media print {
   .backLink { display: none; }
 }
+
+/* ---- Added in fixes-3: classes used by Stock Count and Day Summary ---- */
+.formContainer { display: flex; flex-direction: column; gap: 1.25rem; }
+.subtitle { color: var(--text-secondary, #8888a0); margin: 0.25rem 0 0; font-size: 0.95rem; }
+.card {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+.badgeDanger {
+  display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+  white-space: nowrap; background: rgba(255, 23, 68, 0.15); color: var(--danger, #ff1744);
+}

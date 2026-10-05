@@ -134,3 +134,32 @@
   font-weight: 600;
   color: var(--success);
 }
+
+/* ---- Added in fixes-3: classes the Sales and Trends pages use ---- */
+.subtitle { color: var(--text-secondary, #8888a0); margin: 0.25rem 0 0; font-size: 0.95rem; }
+.card {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 1.25rem;
+  overflow-x: auto;
+}
+.statsGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.statCard {
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 12px; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem;
+}
+.statTitle { font-size: 0.85rem; color: var(--text-secondary, #8888a0); }
+.statValue { font-size: 1.75rem; font-weight: 700; color: var(--text-primary, #fff); }
+.searchInput,
+.selectFilter {
+  padding: 0.65rem 0.75rem; border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  background: var(--bg-secondary, #16161f); color: var(--text-primary, #fff); font-size: 0.95rem;
+}
+.primaryButton {
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.6rem 1.1rem; border-radius: 8px;
+  font-weight: 600; font-size: 0.9rem; cursor: pointer; text-decoration: none;
+  background: var(--accent-primary, #ff6b35); color: #fff; border: none;
+}

@@ -6,10 +6,9 @@ import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
 
-type Store = { id: string; name: string; code: string };
 
 export default function EODReportPage() {
-  const { supabase, store: activeStore } = useActiveStore();
+  const { supabase, store: activeStore, loading: storeLoading } = useActiveStore();
   const todayDate = istDate();
 
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
@@ -22,13 +21,15 @@ export default function EODReportPage() {
   const [wastageCount, setWastageCount] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [varianceAlerts, setVarianceAlerts] = useState<any[]>([]);
+  const [stockNote, setStockNote] = useState<string | null>(null);
+  const [stockError, setStockError] = useState<string | null>(null);
 
   const loadStoreData = useCallback(async () => {
-    if (!activeStore) return;
+    if (!activeStore) { if (!storeLoading) setLoading(false); return; }
     setLoading(true);
     const storeId = activeStore.id;
 
-    const [{ data: salesData }, { data: cash }, { data: wastage }, { data: rpcData }] = await Promise.all([
+    const [{ data: salesData }, { data: cash }, { data: wastage }, { data: rpcData, error: rpcErr }] = await Promise.all([
       supabase.from('daily_sales_summary').select('*').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
       supabase.from('daily_cash_tally').select('tally_type, total_amount').eq('store_id', storeId).eq('entry_date', selectedDate),
       supabase.from('daily_wastage_log').select('id').eq('store_id', storeId).eq('entry_date', selectedDate),
@@ -42,9 +43,16 @@ export default function EODReportPage() {
     setEveningCash(e ? Number(e.total_amount) : null);
     setWastageCount(wastage?.length || 0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setVarianceAlerts(((rpcData as any[]) || []).filter(r => r.status === 'EXCEEDED'));
+    const rows = ((rpcData as any[]) || []);
+    setStockError(rpcErr ? rpcErr.message : null);
+    setVarianceAlerts(rows.filter(r => r.status === 'EXCEEDED' || r.status === 'CHECK'));
+    setStockNote(
+      rpcErr ? null
+      : rows.length === 0 ? 'No completed stock count (opening + closing) for this day, so stock was not checked.'
+      : rows.some(r => r.status === 'NO_SALES_DATA') ? 'Sales By Items has not been uploaded for this day, so usage could not be compared with sales. Only stock that went UP without a delivery is shown.'
+      : null);
     setLoading(false);
-  }, [supabase, activeStore, selectedDate]);
+  }, [supabase, activeStore, selectedDate, storeLoading]);
 
   useEffect(() => { loadStoreData(); }, [loadStoreData]);
 
@@ -230,11 +238,14 @@ export default function EODReportPage() {
           {/* Section 3: Stock Variance & Audit Highlights */}
           <div className={styles.card}>
             <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Alerts</h3>
-            {varianceAlerts.length === 0 ? (
-              <div style={{ padding: '1rem', color: 'var(--success)', background: 'rgba(0,200,83,0.1)', borderRadius: '8px' }}>
-                ✓ No stock alerts for {selectedDate}.
-              </div>
-            ) : (
+            {stockError ? (
+              <div style={{ color: 'var(--danger)' }}>Could not check stock: {stockError}</div>
+            ) : varianceAlerts.length === 0 ? (
+              <div style={{ color: stockNote ? 'var(--text-secondary)' : 'var(--success)' }}>
+                {stockNote || `✓ No stock alerts for ${selectedDate}.`}
+              </div>) : (
+              <>
+              {stockNote && <p style={{ color: 'var(--text-secondary)' }}>{stockNote}</p>}
               <table className={styles.table}>
                 <thead>
                   <tr>
@@ -255,14 +266,17 @@ export default function EODReportPage() {
                       <td>{alert.actual_consumption} {alert.uom}</td>
                       <td style={{ color: 'var(--accent-primary)' }}>{alert.theoretical_consumption} {alert.uom}</td>
                       <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{signed(Number(alert.variance))} {alert.uom}</td>
-                      <td style={{ fontWeight: 700 }}>{alert.variance_percent === null ? 'No sales to explain' : `${signed(Number(alert.variance_percent))}%`}</td>
+                      <td style={{ fontWeight: 700 }}>{alert.variance_percent === null ? (alert.status === 'CHECK' ? 'Stock went up' : 'No sales to explain') : `${signed(Number(alert.variance_percent))}%`}</td>
                       <td>
-                        <span className={styles.badgeDanger}>⚠ Exceeded</span>
+                        {alert.status === 'CHECK'
+                          ? <span className={styles.badgeDanger}>⚠ Check count</span>
+                          : <span className={styles.badgeDanger}>⚠ Used too much</span>}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
         </div>

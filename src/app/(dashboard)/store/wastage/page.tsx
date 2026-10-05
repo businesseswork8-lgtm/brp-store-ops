@@ -127,9 +127,10 @@ export default function WastageLogPage() {
       setForm({ ...form, item_id: '', quantity_wasted: '', reason: '', reason_notes: '' });
       fetchEntries(storeId!);
 
-    } catch (error) {
-      console.error(error);
-      showToast('Failed to save wastage', 'error');
+    } catch (err) {
+      console.error(err);
+      const msg = (err as { message?: string })?.message || '';
+      showToast(/row-level security/i.test(msg) ? 'This day is closed for changes. Ask your manager to correct it.' : 'Failed to save wastage' + (msg ? ': ' + msg : ''), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -142,7 +143,7 @@ export default function WastageLogPage() {
       if (error) throw error;
       fetchEntries(storeId!);
       showToast('Entry deleted', 'success');
-    } catch (error) {
+    } catch {
       showToast('Failed to delete', 'error');
     }
   };
@@ -246,7 +247,7 @@ export default function WastageLogPage() {
             <tbody>
               {entries.map(entry => (
                 <tr key={entry.id}>
-                  <td>{new Date(entry.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                  <td>{new Date(entry.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</td>
                   <td>{entry.items?.name}</td>
                   <td>{entry.quantity_wasted} {entry.items?.uom}</td>
                   <td>

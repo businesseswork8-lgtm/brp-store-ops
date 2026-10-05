@@ -78,7 +78,8 @@ export default function CashTallyPage() {
       showToast(`${mode === 'morning' ? 'Morning' : 'Evening'} cash saved: ₹${total.toLocaleString('en-IN')}`, 'success');
     } catch (err) {
       console.error(err);
-      showToast(err instanceof Error ? err.message : 'Could not save. Please try again.', 'error');
+      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message || '';
+      showToast(/row-level security/i.test(msg) ? 'This day is closed for changes. Ask your manager to correct it.' : msg || 'Could not save. Please try again.', 'error');
     } finally {
       setSubmitting(false);
     }

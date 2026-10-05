@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/client';
 import styles from '../super-admin.module.css';
 
 type Brand = { id: string; name: string };
+
+/** Generic ice cream line used by Baskin Robbins scoop / pack recipes (not a stock item). */
+const ANY_ICE_CREAM_ID = 'a0020000-0000-0000-0000-000000000001';
 type Item = { id: string; name: string; uom: string; brand_id: string };
 
 type RecipeIngredient = {
@@ -25,7 +28,7 @@ type Recipe = {
 };
 
 export default function RecipesPage() {
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -71,7 +74,9 @@ export default function RecipesPage() {
     }
 
     const { data: iRaw } = await supabase.from('items')
-      .select('id, name, uom, is_active, item_categories(brand_id)').eq('is_active', true).order('name');
+      .select('id, name, uom, is_active, item_categories(brand_id)')
+      // Active items, plus "Ice cream (any flavour)" for scoops / packs / sundaes
+      .or(`is_active.eq.true,id.eq.${ANY_ICE_CREAM_ID}`).order('name');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const iData = (iRaw || []).map((i: any) => ({ id: i.id, name: i.name, uom: i.uom, brand_id: i.item_categories?.brand_id }));
     setItems(iData);
@@ -132,7 +137,8 @@ export default function RecipesPage() {
         item_id: i.item_id,
         quantity: i.quantity,
       }));
-      await supabase.from('recipe_ingredients').insert(ingRows);
+      const { error: ingErr } = await supabase.from('recipe_ingredients').insert(ingRows);
+      if (ingErr) alert('Recipe saved, but ingredients failed: ' + ingErr.message);
     }
 
     setIsAdding(false);
@@ -182,12 +188,14 @@ export default function RecipesPage() {
     if (!confirm('Remove this ingredient from the recipe?')) return;
     const { error } = await supabase.from('recipe_ingredients').delete().eq('id', ingredientId);
     if (!error) fetchData();
+    else alert('Could not remove ingredient: ' + error.message);
   }
 
   async function handleDeleteRecipe(recipeId: string, productName: string) {
     if (!confirm(`Are you sure you want to delete recipe "${productName}"?`)) return;
     const { error } = await supabase.from('recipes').delete().eq('id', recipeId);
     if (!error) fetchData();
+    else alert('Could not delete recipe: ' + error.message);
   }
 
   const filteredRecipes = recipes.filter(r => {

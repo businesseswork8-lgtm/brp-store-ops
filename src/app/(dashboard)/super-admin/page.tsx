@@ -19,103 +19,57 @@ type StoreSummary = {
 };
 
 export default function SuperAdminOverviewPage() {
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
   const todayDate = istDate();
 
   const [storeSummaries, setStoreSummaries] = useState<StoreSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [totalDiscounts, setTotalDiscounts] = useState(0);
   const [totalAlerts, setTotalAlerts] = useState(0);
 
   useEffect(() => {
-    fetchExecutiveOverview();
-  }, []);
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const [{ data: prof }, { data: stores }, { data: salesSummaries }] = await Promise.all([
+        supabase.from('profiles').select('role').eq('id', user?.id || '').maybeSingle(),
+        supabase.from('stores').select('id, name, code, brands(name)').eq('is_active', true).order('name'),
+        supabase.from('daily_sales_summary').select('store_id, net_sales, total_discount, has_summary').eq('entry_date', todayDate),
+      ]);
+      setIsSuperAdmin(prof?.role === 'super_admin');
 
-  async function fetchExecutiveOverview() {
-    setLoading(true);
+      const real = (salesSummaries || []).filter(s => s.has_summary !== false);
+      setTotalRevenue(real.reduce((t, s) => t + Number(s.net_sales || 0), 0));
+      setTotalDiscounts(real.reduce((t, s) => t + Number(s.total_discount || 0), 0));
 
-    // Fetch stores
-    const { data: stores } = await supabase
-      .from('stores')
-      .select('id, name, code, brands(name)')
-      .order('name');
+      const summaries: StoreSummary[] = await Promise.all((stores || []).map(async store => {
+        const [{ data: stock }, { data: tally }, { data: rpcData }] = await Promise.all([
+          supabase.from('daily_stock_entries').select('closing_stock').eq('store_id', store.id).eq('entry_date', todayDate),
+          supabase.from('daily_cash_tally').select('tally_type').eq('store_id', store.id).eq('entry_date', todayDate),
+          supabase.rpc('calculate_daily_variance', { p_store_id: store.id, p_date: todayDate }),
+        ]);
+        const rows = (rpcData || []) as { status: string }[];
+        return {
+          id: store.id,
+          name: store.name,
+          code: store.code,
+          brand_name: (store as unknown as { brands?: { name: string } }).brands?.name || store.code,
+          hasOpeningStock: Boolean(stock && stock.length > 0),
+          hasClosingStock: Boolean(stock && stock.length > 0 && stock.every(s => s.closing_stock !== null)),
+          hasPOSUpload: real.some(s => s.store_id === store.id),
+          // Both morning and evening counts done
+          hasCashTally: Boolean(tally?.some(t => t.tally_type === 'morning') && tally?.some(t => t.tally_type === 'evening')),
+          alertsCount: rows.filter(r => r.status === 'EXCEEDED' || r.status === 'CHECK').length,
+        };
+      }));
 
-    if (!stores) {
+      setStoreSummaries(summaries);
+      setTotalAlerts(summaries.reduce((t, s) => t + s.alertsCount, 0));
       setLoading(false);
-      return;
-    }
-
-    // Fetch today's sales summaries
-    const { data: salesSummaries } = await supabase
-      .from('daily_sales_summary')
-      .select('*')
-      .eq('entry_date', todayDate);
-
-    let revSum = 0;
-    let discSum = 0;
-
-    (salesSummaries || []).forEach(s => {
-      revSum += Number(s.net_sales || 0);
-      discSum += Number(s.total_discount || 0);
-    });
-
-    setTotalRevenue(revSum);
-    setTotalDiscounts(discSum);
-
-    // Fetch store status per store
-    const summaries: StoreSummary[] = [];
-    let grandAlerts = 0;
-
-    for (const store of stores) {
-      // Stock entries
-      const { data: stock } = await supabase
-        .from('daily_stock_entries')
-        .select('id, opening_stock, closing_stock')
-        .eq('store_id', store.id)
-        .eq('entry_date', todayDate);
-
-      const hasOpening = Boolean(stock && stock.length > 0);
-      const hasClosing = Boolean(stock && stock.length > 0 && stock.every(s => s.closing_stock !== null));
-
-      // POS Upload
-      const hasPOS = Boolean(salesSummaries?.some(s => s.store_id === store.id));
-
-      // Cash Tally
-      const { data: tally } = await supabase
-        .from('daily_cash_tally')
-        .select('id')
-        .eq('store_id', store.id)
-        .eq('entry_date', todayDate);
-
-      const hasCash = Boolean(tally && tally.length > 0);
-
-      // Variance Alerts
-      const { data: rpcData } = await supabase.rpc('calculate_daily_variance', {
-        p_store_id: store.id,
-        p_date: todayDate,
-      });
-
-      const storeAlerts = (rpcData as any[])?.filter(r => r.status === 'EXCEEDED').length || 0;
-      grandAlerts += storeAlerts;
-
-      summaries.push({
-        id: store.id,
-        name: store.name,
-        code: store.code,
-        brand_name: (store as any).brands?.name || store.code,
-        hasOpeningStock: hasOpening,
-        hasClosingStock: hasClosing,
-        hasPOSUpload: hasPOS,
-        hasCashTally: hasCash,
-        alertsCount: storeAlerts,
-      });
-    }
-
-    setStoreSummaries(summaries);
-    setTotalAlerts(grandAlerts);
-    setLoading(false);
-  }
+    };
+    load();
+  }, [supabase, todayDate]);
 
   return (
     <div className={styles.container}>
@@ -168,6 +122,7 @@ export default function SuperAdminOverviewPage() {
           </p>
         </Link>
 
+        {isSuperAdmin && (
         <Link href="/super-admin/recipes" className={styles.card} style={{ textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📝</div>
           <h3 style={{ margin: '0 0 0.25rem 0' }}>Recipe BOM Builder</h3>
@@ -175,7 +130,9 @@ export default function SuperAdminOverviewPage() {
             Map POS products to exact raw material consumption in grams/ml/pcs.
           </p>
         </Link>
+        )}
 
+        {isSuperAdmin && (
         <Link href="/super-admin/items" className={styles.card} style={{ textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📦</div>
           <h3 style={{ margin: '0 0 0.25rem 0' }}>Item Master Catalog</h3>
@@ -183,7 +140,9 @@ export default function SuperAdminOverviewPage() {
             Manage raw material ingredients, UOMs, and daily tracking flags.
           </p>
         </Link>
+        )}
 
+        {isSuperAdmin && (
         <Link href="/super-admin/variance/thresholds" className={styles.card} style={{ textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚙️</div>
           <h3 style={{ margin: '0 0 0.25rem 0' }}>Audit Thresholds</h3>
@@ -191,7 +150,9 @@ export default function SuperAdminOverviewPage() {
             Configure default and item/category specific tolerance % triggers.
           </p>
         </Link>
+        )}
 
+        {isSuperAdmin && (
         <Link href="/super-admin/users" className={styles.card} style={{ textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>👤</div>
           <h3 style={{ margin: '0 0 0.25rem 0' }}>User & Staff Management</h3>
@@ -199,6 +160,7 @@ export default function SuperAdminOverviewPage() {
             Manage staff profiles, store access permissions, and roles.
           </p>
         </Link>
+        )}
 
         <Link href="/analytics/sales" className={styles.card} style={{ textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📊</div>

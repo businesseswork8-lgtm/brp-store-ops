@@ -13,11 +13,12 @@ type Flavour = {
   is_new: boolean;
   is_active: boolean;
   category_id: string;
+  full_box_grams: number | null;
 };
 
 const SUB_CATEGORIES = ['Fruits', 'Classics & Nuts', 'Chocolates'];
 const BR_BRAND_ID = '22222222-2222-2222-2222-222222222222';
-const EMPTY_TUB_GRAMS = 100;
+const EMPTY_BOX_GRAMS = 100;
 
 export default function FlavoursPage() {
   const [supabase] = useState(() => createClient());
@@ -29,6 +30,8 @@ export default function FlavoursPage() {
   const [search, setSearch] = useState('');
   const [showRemoved, setShowRemoved] = useState(false);
   const [form, setForm] = useState({ name: '', category_id: '', sub_category: SUB_CATEGORIES[0], is_new: true });
+  const [boxEdits, setBoxEdits] = useState<Record<string, string>>({});
+  const [allBox, setAllBox] = useState('');
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
 
   const notify = (text: string, ok = true) => {
@@ -46,7 +49,7 @@ export default function FlavoursPage() {
     const tierList = (tierRows || []) as Tier[];
     const { data: flavourRows } = tierList.length
       ? await supabase.from('items')
-          .select('id, code, name, sub_category, is_new, is_active, category_id')
+          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams')
           .in('category_id', tierList.map(t => t.id))
           .order('name')
       : { data: [] };
@@ -87,7 +90,7 @@ export default function FlavoursPage() {
       purchase_unit_qty: 1,
       is_daily_tracked: true,
       is_active: true,
-      tare_grams: EMPTY_TUB_GRAMS,
+      tare_grams: EMPTY_BOX_GRAMS,
     });
     setSaving(false);
     if (error) { notify('Could not add: ' + error.message, false); return; }
@@ -101,6 +104,30 @@ export default function FlavoursPage() {
     const { error } = await supabase.from('items').update({ is_active: active }).eq('id', f.id);
     if (error) { notify('Could not update: ' + error.message, false); return; }
     notify(active ? `${f.name} is back` : `${f.name} removed`);
+    load();
+  };
+
+  const saveBoxWeight = async (f: Flavour) => {
+    const raw = (boxEdits[f.id] ?? '').trim();
+    const grams = raw === '' ? null : Number(raw);
+    if (grams !== null && (isNaN(grams) || grams <= 0)) { notify('Enter the ice cream weight of one sealed box in grams', false); return; }
+    const { error } = await supabase.from('items').update({ full_box_grams: grams }).eq('id', f.id);
+    if (error) { notify('Could not save: ' + error.message, false); return; }
+    setBoxEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
+    notify(`${f.name}: full box ${grams ?? '—'} g`);
+    load();
+  };
+
+  const applyBoxToAll = async () => {
+    const grams = Number(allBox);
+    if (!(grams > 0)) { notify('Enter the ice cream weight of one sealed box in grams', false); return; }
+    const missing = flavours.filter(f => f.is_active && !f.full_box_grams);
+    if (!missing.length) { notify('Every active flavour already has a box weight'); return; }
+    if (!confirm(`Set ${grams} g as the full box weight for ${missing.length} flavours that don't have one yet?`)) return;
+    const { error } = await supabase.from('items').update({ full_box_grams: grams }).in('id', missing.map(f => f.id));
+    if (error) { notify('Could not save: ' + error.message, false); return; }
+    setAllBox('');
+    notify(`Box weight set for ${missing.length} flavours`);
     load();
   };
 
@@ -123,7 +150,7 @@ export default function FlavoursPage() {
         <div>
           <h1 className={styles.title}>Ice Cream Flavours</h1>
           <p className={styles.subtitle}>
-            {activeCount} flavours in Baskin Robbins Stock Count. Staff weigh tubs; {EMPTY_TUB_GRAMS} g per empty tub is subtracted automatically.
+            {activeCount} flavours in Baskin Robbins Stock Count. Stock is in grams: unopened boxes × full box weight + open box on the scale − {EMPTY_BOX_GRAMS} g.
           </p>
         </div>
       </div>
@@ -165,6 +192,16 @@ export default function FlavoursPage() {
         </div>
       )}
 
+      {canEdit && flavours.some(f => f.is_active && !f.full_box_grams) && (
+        <div className={styles.notice}>
+          {flavours.filter(f => f.is_active && !f.full_box_grams).length} flavours have no full box weight yet — staff can&apos;t count unopened boxes for them.
+          Set each one below, or give them all the same weight:{' '}
+          <input className={styles.search} style={{ width: 140, minWidth: 0, flex: 'none' }} type="number" min="1" placeholder="grams per box"
+            value={allBox} onChange={e => setAllBox(e.target.value)} />{' '}
+          <button className={styles.secondary} onClick={applyBoxToAll}>Apply to those flavours</button>
+        </div>
+      )}
+
       <div className={styles.toolbar}>
         <input className={styles.search} placeholder="Search flavour or code…" value={search} onChange={e => setSearch(e.target.value)} />
         <label className={`${styles.field} ${styles.check}`} style={{ paddingBottom: 0 }}>
@@ -190,6 +227,17 @@ export default function FlavoursPage() {
                 </span>
                 <span className={styles.meta}>{f.sub_category || '—'}</span>
                 <span className={styles.meta}>{f.code || ''}</span>
+                {canEdit ? (
+                  <span className={styles.meta}>
+                    <input className={styles.search} style={{ width: 90, minWidth: 0, flex: 'none' }} type="number" min="1" placeholder="Full box g"
+                      aria-label={`${f.name} full box grams`}
+                      value={boxEdits[f.id] ?? (f.full_box_grams ?? '').toString()}
+                      onChange={e => setBoxEdits(b => ({ ...b, [f.id]: e.target.value }))}
+                      onBlur={() => { if (boxEdits[f.id] !== undefined) saveBoxWeight(f); }} /> g/box
+                  </span>
+                ) : (
+                  <span className={styles.meta}>{f.full_box_grams ? `${f.full_box_grams} g/box` : 'box weight not set'}</span>
+                )}
                 {canEdit && (
                   <>
                     <button className={styles.secondary} onClick={() => toggleNew(f)}>

@@ -6,11 +6,12 @@ import styles from '../store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
 
-type Item = { id: string; name: string; uom: string; tare_grams: number };
+type Item = { id: string; name: string; uom: string; tare_grams: number; full_box_grams: number | null };
 type StaffMember = { id: string; name: string };
 type Delivery = {
   id: string;
   quantity: number;
+  boxes: number | null;
   created_at: string;
   po_reference: string | null;
   items: { name: string; uom: string } | null;
@@ -24,7 +25,7 @@ export default function DeliveriesPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ staff: '', item_id: '', qty: '', tubs: '', note: '' });
+  const [form, setForm] = useState({ staff: '', item_id: '', qty: '', note: '' });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const today = istDate();
@@ -37,7 +38,7 @@ export default function DeliveriesPage() {
   const loadDeliveries = useCallback(async (storeId: string) => {
     const { data } = await supabase
       .from('purchase_orders')
-      .select('id, quantity, created_at, po_reference, items(name, uom), staff_members(name)')
+      .select('id, quantity, boxes, created_at, po_reference, items(name, uom), staff_members(name)')
       .eq('store_id', storeId)
       .eq('entry_date', today)
       .order('created_at', { ascending: false });
@@ -50,13 +51,13 @@ export default function DeliveriesPage() {
     const [{ data: staff }, { data: itemRows }] = await Promise.all([
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       supabase.from('items')
-        .select('id, name, uom, tare_grams, item_categories!inner(brand_id)')
+        .select('id, name, uom, tare_grams, full_box_grams, item_categories!inner(brand_id)')
         .eq('is_active', true)
         .eq('item_categories.brand_id', store.brand_id)
         .order('name'),
     ]);
     setStaffList(staff || []);
-    setItems((itemRows || []).map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0 })));
+    setItems((itemRows || []).map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0, full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams) })));
     await loadDeliveries(store.id);
     setLoading(false);
   }, [supabase, store, loadDeliveries]);
@@ -64,15 +65,19 @@ export default function DeliveriesPage() {
   useEffect(() => { load(); }, [load]);
 
   const item = items.find(i => i.id === form.item_id);
-  const tub = Boolean(item && item.tare_grams > 0);
-  const net = form.qty === '' ? null : Number(form.qty) - (tub ? (Number(form.tubs) || 0) * (item?.tare_grams || 0) : 0);
+  // Ice cream arrives in sealed boxes: staff enter the number of boxes, we convert to grams
+  const box = Boolean(item && item.tare_grams > 0);
+  const boxGrams = Number(item?.full_box_grams) || 0;
+  const qtyNum = form.qty === '' ? null : Number(form.qty);
+  const net = qtyNum === null ? null : box ? qtyNum * boxGrams : qtyNum;
 
   const save = async () => {
     if (!store) return;
     if (!form.staff) { showToast('Please select who received it', 'error'); return; }
     if (!item) { showToast('Please select the item', 'error'); return; }
-    if (net === null || net <= 0) { showToast('Please enter the quantity received', 'error'); return; }
-    if (tub && !(Number(form.tubs) > 0)) { showToast('Please enter how many tubs', 'error'); return; }
+    if (box && !boxGrams) { showToast(`Full box weight for ${item.name} is not set — ask your manager (Ice Cream Flavours page)`, 'error'); return; }
+    if (box && !Number.isInteger(qtyNum)) { showToast('Enter a whole number of boxes', 'error'); return; }
+    if (net === null || !(net > 0)) { showToast('Please enter the quantity received', 'error'); return; }
 
     setSaving(true);
     try {
@@ -83,6 +88,7 @@ export default function DeliveriesPage() {
         item_id: item.id,
         entry_date: today,
         quantity: net,
+        boxes: box ? qtyNum : null,
         supplier_name: 'Warehouse',
         po_reference: form.note.trim() || null,
         staff_member_id: form.staff,
@@ -90,7 +96,7 @@ export default function DeliveriesPage() {
       });
       if (error) throw error;
       showToast(`${item.name}: ${net} ${item.uom} received`, 'success');
-      setForm(f => ({ ...f, item_id: '', qty: '', tubs: '', note: '' }));
+      setForm(f => ({ ...f, item_id: '', qty: '', note: '' }));
       loadDeliveries(store.id);
     } catch (err) {
       console.error(err);
@@ -103,7 +109,7 @@ export default function DeliveriesPage() {
   const remove = async (d: Delivery) => {
     if (!store || !confirm(`Delete ${d.items?.name} (${d.quantity} ${d.items?.uom})?`)) return;
     const { error } = await supabase.from('purchase_orders').delete().eq('id', d.id);
-    if (error) showToast('Could not delete: ' + error.message, 'error');
+    if (error) showToast(/row-level security/i.test(error.message) ? 'This day is closed for changes. Ask your manager.' : 'Could not delete: ' + error.message, 'error');
     else loadDeliveries(store.id);
   };
 
@@ -132,34 +138,29 @@ export default function DeliveriesPage() {
           </div>
           <div>
             <label className={styles.statusText}>Item *</label>
-            <select className={styles.select} value={form.item_id} onChange={e => setForm({ ...form, item_id: e.target.value, qty: '', tubs: '' })}>
+            <select className={styles.select} value={form.item_id} onChange={e => setForm({ ...form, item_id: e.target.value, qty: '' })}>
               <option value="">Select item…</option>
               {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           </div>
           <div>
             <label className={styles.statusText}>
-              {tub ? 'Total weight on scale (g) *' : `Quantity${item ? ` (${item.uom})` : ''} *`}
+              {box ? 'Sealed boxes received *' : `Quantity${item ? ` (${item.uom})` : ''} *`}
             </label>
             <input type="number" inputMode="decimal" min="0" className={styles.input}
               value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="0" />
           </div>
-          {tub && (
-            <div>
-              <label className={styles.statusText}>Number of tubs *</label>
-              <input type="number" inputMode="numeric" min="0" step="1" className={styles.input}
-                value={form.tubs} onChange={e => setForm({ ...form, tubs: e.target.value })} placeholder="0" />
-            </div>
-          )}
           <div>
             <label className={styles.statusText}>Challan / note (optional)</label>
             <input type="text" className={styles.input} value={form.note}
               onChange={e => setForm({ ...form, note: e.target.value })} placeholder="e.g. Challan 1234" />
           </div>
         </div>
-        {tub && net !== null && (
+        {box && (
           <p className={styles.statusText} style={{ marginTop: '0.75rem' }}>
-            Ice cream received: <strong>{net} g</strong> ({item?.tare_grams} g per empty tub removed)
+            {boxGrams
+              ? <>One sealed box = {boxGrams} g{net !== null && net > 0 ? <> · Ice cream received: <strong>{net} g</strong></> : null}</>
+              : <span style={{ color: 'var(--danger)' }}>Full box weight is not set for this flavour — ask your manager.</span>}
           </p>
         )}
         <div className={styles.submitArea} style={{ marginTop: '1rem' }}>
@@ -183,7 +184,7 @@ export default function DeliveriesPage() {
                 <tr key={d.id}>
                   <td>{new Date(d.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</td>
                   <td>{d.items?.name}</td>
-                  <td>{d.quantity} {d.items?.uom}</td>
+                  <td>{d.boxes ? `${d.boxes} box${d.boxes > 1 ? 'es' : ''} = ` : ''}{d.quantity} {d.items?.uom}</td>
                   <td>{d.staff_members?.name || '—'}</td>
                   <td>{d.po_reference || ''}</td>
                   <td>

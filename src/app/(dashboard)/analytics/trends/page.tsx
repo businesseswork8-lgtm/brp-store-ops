@@ -68,7 +68,7 @@ export default function HistoricalTrendsPage() {
       // Group by date
       const map = new Map<string, DayRevenue>();
 
-      data.forEach(row => {
+      data.filter(row => row.has_summary !== false).forEach(row => {
         const d = row.entry_date;
         if (!map.has(d)) {
           map.set(d, {

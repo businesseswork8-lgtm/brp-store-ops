@@ -50,7 +50,11 @@ export default function SalesUploadPage() {
     for (const f of files) {
       problems.push(...f.warnings.map(w => `${f.fileName}: ${w}`));
       const expected = store.rista_branch_name;
-      if (expected && f.branch && norm(f.branch) !== norm(expected)) {
+      if (!expected) {
+        problems.push(`The Rista branch name for ${store.name} is not set yet, so the file can't be checked. Ask the Super Admin to set it.`);
+      } else if (!f.branch) {
+        problems.push(`"${f.fileName}" has been renamed, so we can't tell which store it is from. Please upload the file exactly as Rista downloaded it.`);
+      } else if (norm(f.branch) !== norm(expected)) {
         problems.push(`"${f.fileName}" is from "${f.branch}", but this store is ${store.name} ("${expected}"). Please download the report for this store.`);
       }
     }
@@ -90,31 +94,17 @@ export default function SalesUploadPage() {
 
       // 2. Items: attach to the day's row without overwriting its money figures
       if (items) {
-        let { data: row } = await supabase.from('daily_sales_summary').select('id')
-          .eq('store_id', store.id).eq('entry_date', date).maybeSingle();
-        if (!row) {
-          const { data: created, error } = await supabase.from('daily_sales_summary')
-            .insert({ ...base, net_sales: items.summary.net_sales, has_summary: false })
-            .select('id').single();
-          if (error) throw error;
-          row = created;
-        }
-        const { error: delErr } = await supabase.from('daily_sales_items').delete().eq('sales_summary_id', row!.id);
-        if (delErr) throw delErr;
-        const { error: insErr } = await supabase.from('daily_sales_items').insert(items.items.map(i => ({
-          sales_summary_id: row!.id,
-          sku: i.sku || null,
-          item_type: i.item_type,
-          item_name: i.item_name,
-          variant: i.variant || null,
-          quantity_sold: i.quantity_sold,
-          unit_price: i.unit_price,
-          total_price: i.total_price,
-          category: i.category || null,
-        })));
-        if (insErr) throw insErr;
-        const { error: flagErr } = await supabase.from('daily_sales_summary').update({ has_items: true }).eq('id', row!.id);
-        if (flagErr) throw flagErr;
+        // One database step: replaces the day's items completely, or changes nothing if it fails
+        const { error } = await supabase.rpc('save_sales_items', {
+          p_store_id: store.id,
+          p_date: date,
+          p_net: items.summary.net_sales,
+          p_items: items.items.map(i => ({
+            sku: i.sku, item_type: i.item_type, item_name: i.item_name, variant: i.variant,
+            quantity_sold: i.quantity_sold, unit_price: i.unit_price, total_price: i.total_price, category: i.category,
+          })),
+        });
+        if (error) throw error;
       }
 
       const what = [summary && 'Sales Summary', items && 'Sales By Items'].filter(Boolean).join(' + ');
@@ -123,7 +113,10 @@ export default function SalesUploadPage() {
       if (inputRef.current) inputRef.current.value = '';
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: 'Could not save: ' + (err instanceof Error ? err.message : String(err)) });
+      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message || String(err);
+      setMessage({ type: 'error', text: /row-level security/i.test(msg)
+        ? 'This day is closed for store changes. Ask your manager to upload it.'
+        : 'Could not save: ' + msg });
     } finally {
       setSaving(false);
     }
