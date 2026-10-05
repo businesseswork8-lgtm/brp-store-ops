@@ -27,6 +27,7 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname
 
   const isAuthPage = path.startsWith('/login')
+  const isResetPassword = path.startsWith('/reset-password')
   const isProtectedRoute = path.startsWith('/store') || path.startsWith('/analytics') || path.startsWith('/super-admin')
 
   const redirectTo = (pathname: string) => {
@@ -39,6 +40,8 @@ export async function updateSession(request: NextRequest) {
   if (!user) {
     return isProtectedRoute ? redirectTo('/login') : supabaseResponse
   }
+
+  if (isResetPassword) return supabaseResponse
 
   if (!isAuthPage && !isProtectedRoute) return supabaseResponse
 
