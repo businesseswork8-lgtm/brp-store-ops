@@ -69,6 +69,8 @@ export async function updateSession(request: NextRequest) {
       (path.startsWith('/store') && (profile.can_edit || path === '/store/eod-report')) ||
       path === '/super-admin' ||
       path === '/super-admin/variance' ||
+      path === '/super-admin/stock-report' ||
+      (path === '/super-admin/items' && profile.can_edit) ||
       path === '/super-admin/flavours'
     )) ||
     (profile.role === 'store' && path.startsWith('/store'))

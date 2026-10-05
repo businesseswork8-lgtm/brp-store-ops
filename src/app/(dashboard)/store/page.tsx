@@ -68,11 +68,27 @@ export default function StoreDashboardPage() {
     },
     {
       id: 'opening-stock',
-      title: 'Opening Stock',
+      title: 'Opening Stock (Open & Close)',
       text: status.openingStock ? 'Completed for today' : 'Pending',
       status: status.openingStock ? 'completed' : 'pending',
       href: '/store/stock-entry',
       icon: status.openingStock ? '✓' : '!',
+    },
+    {
+      id: 'stock-count',
+      title: 'Stock Count',
+      text: 'Count the items due tonight (at closing)',
+      status: 'optional',
+      href: '/store/count',
+      icon: '📦',
+    },
+    {
+      id: 'rista-usage',
+      title: 'Upload Rista Usage',
+      text: "Rista \"Consumption Variance\" for yesterday",
+      status: 'optional',
+      href: '/store/rista-usage',
+      icon: '📥',
     },
     {
       id: 'deliveries',
@@ -92,7 +108,7 @@ export default function StoreDashboardPage() {
     },
     {
       id: 'closing-stock',
-      title: 'Closing Stock',
+      title: 'Closing Stock (Open & Close)',
       text: status.closingStock ? 'Completed for today' : 'Pending',
       status: status.closingStock ? 'completed' : 'pending',
       href: '/store/stock-entry',

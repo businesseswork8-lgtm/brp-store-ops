@@ -117,7 +117,7 @@ export default function VarianceDashboardPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Stock Variance{store ? ` — ${store.name}` : ''}</h1>
+          <h1 className={styles.title}>Recipe Variance{store ? ` — ${store.name}` : ''}</h1>
           <p className={styles.subtitle}>
             Stock actually used vs. what sales say should have been used. Change store from the top bar.
           </p>
