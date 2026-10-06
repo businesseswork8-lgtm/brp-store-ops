@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { istDate, addDays } from '@/lib/dates';
 import { Frequency, isDue } from '@/lib/stock/schedule';
 import styles from './super-admin.module.css';
+import { BR_BRAND_ID } from '@/lib/br';
 
 type StoreRow = {
   id: string; name: string; brand: string;
@@ -13,6 +14,7 @@ type StoreRow = {
   salesUploaded: boolean; usageUploaded: boolean;
   short: number; excess: number; problems: number;
   yesterdaySales: number | null;
+  br?: { flavours: number; opened: number; closed: number; itemsUploaded: boolean; over: number; checked: boolean };
 };
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
@@ -31,7 +33,7 @@ export default function AllStoresPage() {
       const out = await Promise.all((stores || []).map(async st => {
         const [{ data: cash }, { data: sales }, { data: usage }, { data: items }, { data: counts }, { data: report }] = await Promise.all([
           supabase.from('daily_cash_tally').select('tally_type').eq('store_id', st.id).eq('entry_date', today),
-          supabase.from('daily_sales_summary').select('net_sales, has_summary').eq('store_id', st.id).eq('entry_date', yesterday).maybeSingle(),
+          supabase.from('daily_sales_summary').select('net_sales, has_summary, has_items').eq('store_id', st.id).eq('entry_date', yesterday).maybeSingle(),
           supabase.from('rista_consumption_uploads').select('id').eq('store_id', st.id).lte('date_from', yesterday).gte('date_to', yesterday).limit(1),
           supabase.from('items').select('id, count_frequency, item_categories!inner(brand_id)')
             .eq('is_active', true).eq('item_categories.brand_id', st.brand_id).neq('count_frequency', 'none'),
@@ -39,6 +41,22 @@ export default function AllStoresPage() {
             .gte('count_date', addDays(today, -62)).order('count_date', { ascending: false }).limit(5000),
           supabase.rpc('stock_variance_report', { p_store_id: st.id, p_from: null, p_to: today }),
         ]);
+        let br: StoreRow['br'];
+        if (st.brand_id === BR_BRAND_ID) {
+          const [{ data: rep }, { data: weighed }] = await Promise.all([
+            supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: yesterday }),
+            supabase.from('br_flavour_counts').select('session').eq('store_id', st.id).eq('count_date', today),
+          ]);
+          const r = (rep || []) as { status: string }[];
+          br = {
+            flavours: r.length,
+            opened: (weighed || []).filter(w => w.session === 'opening').length,
+            closed: (weighed || []).filter(w => w.session === 'closing').length,
+            itemsUploaded: Boolean(sales?.has_items),
+            over: r.filter(x => x.status === 'OVER').length,
+            checked: r.some(x => ['OVER', 'OK', 'CHECK'].includes(x.status)),
+          };
+        }
         const last: Record<string, string> = {};
         (counts || []).forEach(c => { if (!last[c.item_id]) last[c.item_id] = c.count_date; });
         const due = (items || []).filter(i => isDue(i.count_frequency as Frequency, last[i.id] || null, today));
@@ -54,6 +72,7 @@ export default function AllStoresPage() {
           excess: ok.filter(r => Number(r.variance_amount) > 0).reduce((t, r) => t + Number(r.variance_amount), 0),
           problems: rep.filter(r => r.status === 'CHECK_RECEIVED').length,
           yesterdaySales: sales && sales.has_summary !== false ? Number(sales.net_sales) : null,
+          br,
         } as StoreRow;
       }));
       setRows(out);
@@ -65,7 +84,7 @@ export default function AllStoresPage() {
   if (loading) return <div className={styles.loading}>Loading stores…</div>;
 
   const totalSales = rows.reduce((t, r) => t + (r.yesterdaySales || 0), 0);
-  const totalShort = rows.reduce((t, r) => t + r.short, 0);
+  const totalShort = rows.reduce((t, r) => t + (r.br ? 0 : r.short), 0);
   const ok = (b: boolean) => <span className={b ? styles.badgeSuccess : styles.badgeDefault}>{b ? '✓' : 'Pending'}</span>;
 
   return (
@@ -82,7 +101,7 @@ export default function AllStoresPage() {
         <div className={styles.statCard}><div className={styles.statLabel}>Short at latest counts</div>
           <div className={styles.statValue} style={{ color: totalShort < 0 ? 'var(--danger)' : undefined }}>{inr(totalShort)}</div></div>
         <div className={styles.statCard}><div className={styles.statLabel}>Stores with stock counted tonight</div>
-          <div className={styles.statValue}>{rows.filter(r => r.due > 0 && r.counted >= r.due).length} / {rows.length}</div></div>
+          <div className={styles.statValue}>{rows.filter(r => r.br ? r.br.flavours > 0 && r.br.closed >= r.br.flavours : r.due > 0 && r.counted >= r.due).length} / {rows.length}</div></div>
       </div>
 
       <div className={styles.card} style={{ overflowX: 'auto' }}>
@@ -95,6 +114,17 @@ export default function AllStoresPage() {
               <tr key={r.id}>
                 <td style={{ fontWeight: 600 }}>{r.name}<div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{r.brand}</div></td>
                 <td>{r.cash === 'Both' ? ok(true) : <span className={styles.badgeDefault}>{r.cash}</span>}</td>
+                {r.br ? (
+                  <>
+                    <td>🍨 Open {r.br.opened >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.opened}/{r.br.flavours}</span>}
+                      {' '}Close {r.br.closed >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.closed}/{r.br.flavours}</span>}</td>
+                    <td>Sales {ok(r.salesUploaded)} &nbsp; Items {ok(r.br.itemsUploaded)}</td>
+                    <td>{!r.br.checked ? <span className={styles.badgeDefault}>Not checked</span>
+                      : r.br.over ? <span className={styles.badgeDanger}>{r.br.over} flavour{r.br.over > 1 ? 's' : ''} over yesterday</span>
+                      : ok(true)}</td>
+                  </>
+                ) : (
+                <>
                 <td>{r.due === 0 ? <span className={styles.badgeDefault}>Nothing due</span>
                   : r.counted >= r.due ? ok(true) : <span className={styles.badgeDefault}>{r.counted} / {r.due}</span>}</td>
                 <td>Sales {ok(r.salesUploaded)} &nbsp; Usage {ok(r.usageUploaded)}</td>
@@ -103,6 +133,8 @@ export default function AllStoresPage() {
                   {' / '}<span style={{ color: 'var(--success)' }}>{inr(r.excess)}</span>
                   {r.problems > 0 && <div style={{ fontSize: '0.75rem', color: 'var(--warning)' }}>{r.problems} delivery not entered?</div>}
                 </td>
+                </>
+                )}
                 <td><Link href="/super-admin/stock-report" className={styles.secondaryButton}
                   onClick={() => { try { localStorage.setItem('selectedStore', r.id); } catch { /* ignore */ } }}>Stock report</Link></td>
               </tr>

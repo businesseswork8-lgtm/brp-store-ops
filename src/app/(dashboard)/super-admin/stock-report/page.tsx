@@ -7,6 +7,8 @@ import { FREQUENCY_LABEL, Frequency } from '@/lib/stock/schedule';
 import { displayUnit, toDisplay } from '@/lib/stock/units';
 import styles from '../super-admin.module.css';
 import { CompanyTally } from './CompanyTally';
+import { BRReport } from './BRReport';
+import { isBRStore } from '@/lib/br';
 
 type Row = {
   item_id: string; item_name: string; stock_group: string; uom: string; rista_unit: string | null;
@@ -32,7 +34,14 @@ const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 const fmt = (ymd: string) => new Date(ymd + 'T00:00:00Z').toLocaleDateString('en-IN', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 const groupKey = (g: string) => (GROUPS.includes(g) ? g : /pack/i.test(g) ? 'Packaging' : /cake|pastr/i.test(g) ? 'Cakes & Pastries' : /misc|other/i.test(g) ? 'Other' : 'Raw Material');
 
+/** Baskin Robbins stores get the per-flavour ice cream report. */
 export default function StockReportPage() {
+  const { store, loading } = useActiveStore();
+  if (loading) return <div className={styles.loading}>Loading…</div>;
+  return isBRStore(store) ? <BRReport /> : <GeneralStockReport />;
+}
+
+function GeneralStockReport() {
   const { supabase, store, profile } = useActiveStore();
   const [showTally, setShowTally] = useState(false);
   const [mode, setMode] = useState<'latest' | 'range'>('latest');

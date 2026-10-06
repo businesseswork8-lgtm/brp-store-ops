@@ -14,6 +14,7 @@ type Move = typeof MOVES[number]['v'];
 import styles from '../store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
+import { isBRStore } from '@/lib/br';
 
 type Item = { id: string; name: string; uom: string; tare_grams: number; full_box_grams: number | null; rista_unit: string | null };
 type StaffMember = { id: string; name: string };
@@ -61,13 +62,16 @@ export default function DeliveriesPage() {
     const [{ data: staff }, { data: itemRows }] = await Promise.all([
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       supabase.from('items')
-        .select('id, name, uom, tare_grams, full_box_grams, rista_unit, item_categories!inner(brand_id)')
+        .select('id, name, uom, tare_grams, full_box_grams, rista_unit, item_categories!inner(brand_id, is_flavour)')
         .eq('is_active', true)
         .eq('item_categories.brand_id', store.brand_id)
         .order('name'),
     ]);
+    // Baskin Robbins: only ice cream flavours are tracked
+    const br = isBRStore(store);
+    const rows = (itemRows || []).filter(i => !br || (i as unknown as { item_categories: { is_flavour: boolean } }).item_categories?.is_flavour);
     setStaffList(staff || []);
-    setItems((itemRows || []).map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0, full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams), rista_unit: i.rista_unit })));
+    setItems(rows.map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0, full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams), rista_unit: i.rista_unit })));
     await loadDeliveries(store.id);
     setLoading(false);
   }, [supabase, store, loadDeliveries]);

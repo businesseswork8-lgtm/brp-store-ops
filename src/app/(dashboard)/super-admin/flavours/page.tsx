@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import styles from './flavours.module.css';
+import { BRSettings } from './BRSettings';
 
 type Tier = { id: string; name: string; sort_order: number };
 type Flavour = {
@@ -14,6 +15,7 @@ type Flavour = {
   is_active: boolean;
   category_id: string;
   full_box_grams: number | null;
+  tasting_allowance_grams: number;
 };
 
 const SUB_CATEGORIES = ['Fruits', 'Classics & Nuts', 'Chocolates'];
@@ -32,6 +34,7 @@ export default function FlavoursPage() {
   const [form, setForm] = useState({ name: '', category_id: '', sub_category: SUB_CATEGORIES[0], is_new: true });
   const [boxEdits, setBoxEdits] = useState<Record<string, string>>({});
   const [allBox, setAllBox] = useState('');
+  const [allowEdits, setAllowEdits] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
 
   const notify = (text: string, ok = true) => {
@@ -49,7 +52,7 @@ export default function FlavoursPage() {
     const tierList = (tierRows || []) as Tier[];
     const { data: flavourRows } = tierList.length
       ? await supabase.from('items')
-          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams')
+          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams, tasting_allowance_grams')
           .in('category_id', tierList.map(t => t.id))
           .order('name')
       : { data: [] };
@@ -118,6 +121,17 @@ export default function FlavoursPage() {
     load();
   };
 
+  const saveAllowance = async (f: Flavour) => {
+    const raw = (allowEdits[f.id] ?? '').trim();
+    const g = raw === '' ? 0 : Number(raw);
+    if (isNaN(g) || g < 0) { notify('Tasting allowance must be 0 or more grams', false); return; }
+    const { error } = await supabase.from('items').update({ tasting_allowance_grams: g }).eq('id', f.id);
+    if (error) { notify('Could not save: ' + error.message, false); return; }
+    setAllowEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
+    notify(`${f.name}: tasting allowance ${g} g a day`);
+    load();
+  };
+
   const applyBoxToAll = async () => {
     const grams = Number(allBox);
     if (!(grams > 0)) { notify('Enter the ice cream weight of one sealed box in grams', false); return; }
@@ -150,7 +164,8 @@ export default function FlavoursPage() {
         <div>
           <h1 className={styles.title}>Ice Cream Flavours</h1>
           <p className={styles.subtitle}>
-            {activeCount} flavours in Baskin Robbins Stock Count. Stock is in grams: unopened boxes × full box weight + open box on the scale − {EMPTY_BOX_GRAMS} g.
+            {activeCount} flavours weighed at opening and closing. Stock is in grams: unopened boxes × full box weight + open box on the scale − {EMPTY_BOX_GRAMS} g.
+            Tasting allowance = grams a day a flavour may be short (customer tastings) before it shows as <strong>Over</strong>.
           </p>
         </div>
       </div>
@@ -238,6 +253,17 @@ export default function FlavoursPage() {
                 ) : (
                   <span className={styles.meta}>{f.full_box_grams ? `${f.full_box_grams} g/box` : 'box weight not set'}</span>
                 )}
+                {canEdit ? (
+                  <span className={styles.meta}>
+                    <input className={styles.search} style={{ width: 80, minWidth: 0, flex: 'none' }} type="number" min="0" placeholder="0"
+                      aria-label={`${f.name} tasting allowance grams`} title="Tasting allowance: grams a day this flavour may be short (tastings) before it shows as Over"
+                      value={allowEdits[f.id] ?? String(f.tasting_allowance_grams ?? 0)}
+                      onChange={e => setAllowEdits(a => ({ ...a, [f.id]: e.target.value }))}
+                      onBlur={() => { if (allowEdits[f.id] !== undefined) saveAllowance(f); }} /> g tasting/day
+                  </span>
+                ) : (
+                  <span className={styles.meta}>{Number(f.tasting_allowance_grams) || 0} g tasting/day</span>
+                )}
                 {canEdit && (
                   <>
                     <button className={styles.secondary} onClick={() => toggleNew(f)}>
@@ -253,6 +279,8 @@ export default function FlavoursPage() {
           </div>
         );
       })}
+
+      <BRSettings canEdit={canEdit} flavours={flavours.filter(f => f.is_active).map(f => ({ id: f.id, name: f.name }))} />
 
       {toast && <div className={`${styles.toast} ${toast.ok ? styles.ok : styles.err}`}>{toast.text}</div>}
     </div>

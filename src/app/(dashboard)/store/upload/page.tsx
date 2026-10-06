@@ -8,6 +8,7 @@ import { isMonthEndAudit, parseMonthEndAudit, AuditLine } from '@/lib/stock/audi
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate, addDays } from '@/lib/dates';
 import styles from './page.module.css';
+import { isBRStore } from '@/lib/br';
 
 type Parsed = ParsedPOSReport & { fileName: string };
 type Usage = ParsedConsumption & { fileName: string };
@@ -195,10 +196,17 @@ export default function UploadPage() {
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
         <div>
           <h1 className={styles.title}>Upload Rista Files</h1>
-          <p className={styles.subtitle}>
-            Every morning, download these two for <strong>yesterday</strong> from Rista and drop both in here together:
-            <br />1. <strong>Sales Summary</strong> &nbsp; 2. <strong>Consumption Variance</strong> (same day)
-          </p>
+          {isBRStore(store) ? (
+            <p className={styles.subtitle}>
+              At closing (after the last bill), download these two for <strong>today</strong> from Rista and drop both in here together:
+              <br />1. <strong>Sales Summary</strong> &nbsp; 2. <strong>Sales By Items</strong> (same day — this tells us which flavours were sold)
+            </p>
+          ) : (
+            <p className={styles.subtitle}>
+              Every morning, download these two for <strong>yesterday</strong> from Rista and drop both in here together:
+              <br />1. <strong>Sales Summary</strong> &nbsp; 2. <strong>Consumption Variance</strong> (same day)
+            </p>
+          )}
         </div>
         <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>

@@ -9,6 +9,8 @@ import { Frequency, FREQUENCY_LABEL, isDue } from '@/lib/stock/schedule';
 import { displayUnit, fromDisplay, toDisplay } from '@/lib/stock/units';
 import { BoxEntry, boxEntryEmpty, boxNet } from '@/lib/icecream';
 import { StockTabs } from '@/components/store/StockTabs';
+import { BRCount } from '@/components/store/BRCount';
+import { isBRStore } from '@/lib/br';
 
 type Item = {
   id: string; name: string; uom: string; rista_unit: string | null;
@@ -21,7 +23,14 @@ type StaffMember = { id: string; name: string };
 
 const ORDER: Frequency[] = ['daily', 'fortnightly', 'monthly', 'none'];
 
+/** Baskin Robbins stores weigh ice cream flavours; every other store uses the scheduled count. */
 export default function StockCountPage() {
+  const { store, loading } = useActiveStore();
+  if (loading) return <div className={styles.spinner}></div>;
+  return isBRStore(store) ? <BRCount /> : <GeneralCount />;
+}
+
+function GeneralCount() {
   const { supabase, store, loading: storeLoading } = useActiveStore();
   const [items, setItems] = useState<Item[]>([]);
   const [lastCount, setLastCount] = useState<Record<string, string>>({});

@@ -6,6 +6,7 @@ import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate, addDays, displayDate } from '@/lib/dates';
 import { Frequency, isDue } from '@/lib/stock/schedule';
 import styles from './store.module.css';
+import { isBRStore } from '@/lib/br';
 
 type Step = { id: string; when: string; title: string; text: string; done: boolean; href: string; icon: string; note?: string };
 
@@ -16,7 +17,10 @@ export default function TonightPage() {
     morningCash: false, eveningCash: false,
     salesUploaded: false, usageUploaded: false,
     due: 0, counted: 0, received: 0, wasted: 0,
+    // Baskin Robbins
+    flavours: 0, opened: 0, closed: 0, todaySummary: false, todayItems: false,
   });
+  const br = isBRStore(store);
 
   const today = istDate();
   const yesterday = addDays(today, -1);
@@ -35,6 +39,22 @@ export default function TonightPage() {
       supabase.from('purchase_orders').select('id').eq('store_id', store.id).eq('entry_date', today),
       supabase.from('daily_wastage_log').select('id').eq('store_id', store.id).eq('entry_date', today),
     ]);
+    let brx = { flavours: 0, opened: 0, closed: 0, todaySummary: false, todayItems: false };
+    if (isBRStore(store)) {
+      const [{ count: fl }, { data: weighed }, { data: todaySales }] = await Promise.all([
+        supabase.from('items').select('id, item_categories!inner(brand_id, is_flavour)', { count: 'exact', head: true })
+          .eq('is_active', true).eq('item_categories.brand_id', store.brand_id).eq('item_categories.is_flavour', true),
+        supabase.from('br_flavour_counts').select('session').eq('store_id', store.id).eq('count_date', today),
+        supabase.from('daily_sales_summary').select('has_summary, has_items').eq('store_id', store.id).eq('entry_date', today).maybeSingle(),
+      ]);
+      brx = {
+        flavours: fl || 0,
+        opened: (weighed || []).filter(w => w.session === 'opening').length,
+        closed: (weighed || []).filter(w => w.session === 'closing').length,
+        todaySummary: Boolean(todaySales && todaySales.has_summary !== false),
+        todayItems: Boolean(todaySales?.has_items),
+      };
+    }
     const last: Record<string, string> = {};
     (counts || []).forEach(c => { if (!last[c.item_id]) last[c.item_id] = c.count_date; });
     const due = (items || []).filter(i => isDue(i.count_frequency as Frequency, last[i.id] || null, today));
@@ -47,6 +67,7 @@ export default function TonightPage() {
       counted: due.filter(i => last[i.id] === today).length,
       received: rec?.length || 0,
       wasted: wst?.length || 0,
+      ...brx,
     });
     setLoading(false);
   }, [supabase, store, today, yesterday]);
@@ -65,7 +86,17 @@ export default function TonightPage() {
     );
   }
 
-  const steps: Step[] = [
+  const weighText = (n: number) => s.flavours ? `${n} of ${s.flavours} flavours weighed` : 'No flavours set up';
+  const brSteps: Step[] = [
+    { id: 'mcash', when: 'Opening', title: 'Count cash', text: 'Cash in the drawer at opening', done: s.morningCash, href: '/store/cash-tally', icon: '💰' },
+    { id: 'open', when: 'Opening', title: 'Weigh ice cream', text: weighText(s.opened), done: s.flavours > 0 && s.opened >= s.flavours, href: '/store/count', icon: '🍨' },
+    { id: 'close', when: 'Closing', title: 'Weigh ice cream', text: weighText(s.closed), done: s.flavours > 0 && s.closed >= s.flavours, href: '/store/count', icon: '🍨' },
+    { id: 'upload', when: 'Closing', title: "Upload today's Rista files", text: 'After the last bill: Sales Summary + Sales By Items',
+      done: s.todaySummary && s.todayItems, href: '/store/upload', icon: '📄',
+      note: s.todaySummary !== s.todayItems ? (s.todaySummary ? 'Sales By Items still missing' : 'Sales Summary still missing') : undefined },
+    { id: 'ecash', when: 'Closing', title: 'Count cash', text: 'Cash in the drawer at closing', done: s.eveningCash, href: '/store/cash-tally', icon: '💰' },
+  ];
+  const generalSteps: Step[] = [
     { id: 'mcash', when: 'Opening', title: 'Count cash', text: 'Cash in the drawer at opening', done: s.morningCash, href: '/store/cash-tally', icon: '💰' },
     { id: 'upload', when: 'Opening', title: "Upload yesterday's Rista files", text: 'Sales Summary + Consumption Variance, both for yesterday',
       done: s.salesUploaded && s.usageUploaded, href: '/store/upload', icon: '📄',
@@ -74,6 +105,7 @@ export default function TonightPage() {
       done: s.due === 0 || s.counted >= s.due, href: '/store/count', icon: '📦' },
     { id: 'ecash', when: 'Closing', title: 'Count cash', text: 'Cash in the drawer at closing', done: s.eveningCash, href: '/store/cash-tally', icon: '💰' },
   ];
+  const steps = br ? brSteps : generalSteps;
   const doneCount = steps.filter(x => x.done).length;
 
   return (
@@ -101,14 +133,14 @@ export default function TonightPage() {
         <Link href="/store/deliveries" className={`${styles.statusCard} ${styles.optional}`} style={{ textDecoration: 'none' }}>
           <div className={styles.statusIcon}>🚚</div>
           <div className={styles.statusContent}>
-            <h3 className={styles.statusTitle}>Stock arrived</h3>
+            <h3 className={styles.statusTitle}>{br ? 'Ice cream arrived' : 'Stock arrived'}</h3>
             <p className={styles.statusText}>{s.received ? `${s.received} entered today` : 'Enter it as soon as it arrives'}</p>
           </div>
         </Link>
         <Link href="/store/wastage" className={`${styles.statusCard} ${styles.optional}`} style={{ textDecoration: 'none' }}>
           <div className={styles.statusIcon}>🗑️</div>
           <div className={styles.statusContent}>
-            <h3 className={styles.statusTitle}>Something wasted</h3>
+            <h3 className={styles.statusTitle}>{br ? 'Ice cream wasted' : 'Something wasted'}</h3>
             <p className={styles.statusText}>{s.wasted ? `${s.wasted} entered today` : 'Spilled, expired or dropped'}</p>
           </div>
         </Link>

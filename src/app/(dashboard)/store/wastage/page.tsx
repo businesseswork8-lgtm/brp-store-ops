@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { StockTabs } from '@/components/store/StockTabs';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
+import { isBRStore } from '@/lib/br';
 import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
 import { WASTAGE_REASONS } from '@/lib/types';
@@ -60,13 +61,17 @@ export default function WastageLogPage() {
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       // Only this store's brand
       supabase.from('items')
-        .select('id, name, uom, item_categories!inner(brand_id)')
+        .select('id, name, uom, item_categories!inner(brand_id, is_flavour)')
         .eq('is_active', true)
         .eq('item_categories.brand_id', store.brand_id)
         .order('name'),
     ]);
     setStaffList(staffData || []);
-    setItems((itemsData || []).map(i => ({ id: i.id, name: i.name, uom: i.uom })));
+    // Baskin Robbins: only ice cream flavours are tracked (in grams)
+    const br = isBRStore(store);
+    setItems((itemsData || [])
+      .filter(i => !br || (i as unknown as { item_categories: { is_flavour: boolean } }).item_categories?.is_flavour)
+      .map(i => ({ id: i.id, name: i.name, uom: i.uom })));
     await fetchEntries(store.id);
     setLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps

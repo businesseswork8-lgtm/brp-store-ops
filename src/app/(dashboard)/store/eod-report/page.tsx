@@ -6,6 +6,7 @@ import { displayUnit, toDisplay } from '@/lib/stock/units';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate } from '@/lib/dates';
 import styles from '../store.module.css';
+import { isBRStore, toReportRows, BRReportRow, grams, signedGrams } from '@/lib/br';
 
 
 export default function EODReportPage() {
@@ -24,6 +25,7 @@ export default function EODReportPage() {
   const [varianceAlerts, setVarianceAlerts] = useState<any[]>([]);
   const [stockNote, setStockNote] = useState<string | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
+  const [brRows, setBrRows] = useState<BRReportRow[] | null>(null);
 
   const loadStoreData = useCallback(async () => {
     if (!activeStore) { if (!storeLoading) setLoading(false); return; }
@@ -37,6 +39,10 @@ export default function EODReportPage() {
       supabase.rpc('stock_variance_report', { p_store_id: storeId, p_from: null, p_to: selectedDate }),
     ]);
 
+    if (isBRStore(activeStore)) {
+      const { data: br, error: brErr } = await supabase.rpc('br_daily_report', { p_store_id: storeId, p_date: selectedDate });
+      setBrRows(brErr ? [] : toReportRows(br));
+    } else setBrRows(null);
     setPosSales(salesData && salesData.has_summary !== false ? salesData : null);
     const m = cash?.find(c => c.tally_type === 'morning');
     const e = cash?.find(c => c.tally_type === 'evening');
@@ -239,8 +245,43 @@ export default function EODReportPage() {
             <div style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>Wastage entries: {wastageCount}</div>
           </div>
 
+          {/* Section 3 (Baskin Robbins): ice cream per flavour */}
+          {brRows && (() => {
+            const counted = brRows.filter(r => r.status !== 'NOT_COUNTED').length;
+            const bad = brRows.filter(r => r.status === 'OVER' || r.status === 'CHECK');
+            const noSales = brRows.some(r => r.status === 'NO_SALES');
+            return (
+              <div className={styles.card}>
+                <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Ice Cream</h3>
+                <div style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  {counted} of {brRows.length} flavours weighed at opening and closing.
+                </div>
+                {noSales ? (
+                  <div style={{ color: 'var(--warning)' }}>⚠ Sales By Items not uploaded for {selectedDate} — flavours can&apos;t be checked yet.</div>
+                ) : counted === 0 ? null : bad.length === 0 ? (
+                  <div style={{ color: 'var(--success)' }}>✓ Every weighed flavour is within its tasting allowance.</div>
+                ) : (
+                  <table className={styles.table}>
+                    <thead><tr><th>Flavour</th><th>Used</th><th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {bad.map(r => (
+                        <tr key={r.item_id} style={{ background: r.status === 'OVER' ? 'rgba(255,23,68,0.08)' : undefined }}>
+                          <td style={{ fontWeight: 600 }}>{r.flavour}</td>
+                          <td>{grams(r.used)}</td><td>{grams(r.sold)}</td><td>{r.wasted ? grams(r.wasted) : '—'}</td>
+                          <td style={{ fontWeight: 700, color: r.status === 'OVER' ? 'var(--danger)' : undefined }}>{signedGrams(r.gap)}</td>
+                          <td>{grams(r.allowance)}</td>
+                          <td><span className={r.status === 'OVER' ? styles.badgeDanger : styles.badge}>{r.status === 'OVER' ? '⚠ Over' : 'Check count'}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Section 3: Stock Variance & Audit Highlights */}
-          <div className={styles.card}>
+          {!brRows && <div className={styles.card}>
             <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Short</h3>
             {stockError ? (
               <div style={{ color: 'var(--danger)' }}>Could not check stock: {stockError}</div>
@@ -273,7 +314,7 @@ export default function EODReportPage() {
               </table>
               </>
             )}
-          </div>
+          </div>}
         </div>
       )}
     </div>
