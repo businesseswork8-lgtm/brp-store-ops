@@ -16,7 +16,14 @@ type Flavour = {
   category_id: string;
   full_box_grams: number | null;
   tasting_allowance_grams: number;
+  tare_grams: number;
 };
+type Tab = 'sizes' | 'flavours' | 'matching';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'sizes', label: '⚖️ Scoop & pack grams' },
+  { id: 'flavours', label: '🍨 Flavours: box weight & tasting' },
+  { id: 'matching', label: '🔗 Rista sales matching' },
+];
 
 const SUB_CATEGORIES = ['Fruits', 'Classics & Nuts', 'Chocolates'];
 const BR_BRAND_ID = '22222222-2222-2222-2222-222222222222';
@@ -34,6 +41,7 @@ export default function FlavoursPage() {
   const [form, setForm] = useState({ name: '', category_id: '', sub_category: SUB_CATEGORIES[0], is_new: true });
   const [boxEdits, setBoxEdits] = useState<Record<string, string>>({});
   const [allBox, setAllBox] = useState('');
+  const [tab, setTab] = useState<Tab>('sizes');
   const [allowEdits, setAllowEdits] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
 
@@ -52,7 +60,7 @@ export default function FlavoursPage() {
     const tierList = (tierRows || []) as Tier[];
     const { data: flavourRows } = tierList.length
       ? await supabase.from('items')
-          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams, tasting_allowance_grams')
+          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams, tasting_allowance_grams, tare_grams')
           .in('category_id', tierList.map(t => t.id))
           .order('name')
       : { data: [] };
@@ -93,7 +101,7 @@ export default function FlavoursPage() {
       purchase_unit_qty: 1,
       is_daily_tracked: true,
       is_active: true,
-      tare_grams: EMPTY_BOX_GRAMS,
+      tare_grams: Number(flavours.find(f => f.is_active)?.tare_grams) || EMPTY_BOX_GRAMS,
     });
     setSaving(false);
     if (error) { notify('Could not add: ' + error.message, false); return; }
@@ -162,7 +170,7 @@ export default function FlavoursPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Ice Cream Flavours</h1>
+          <h1 className={styles.title}>Ice Cream Setup</h1>
           <p className={styles.subtitle}>
             {activeCount} flavours weighed at opening and closing. Stock is in grams: unopened boxes × full box weight + open box on the scale − {EMPTY_BOX_GRAMS} g.
             Tasting allowance = grams a day a flavour may be short (customer tastings) before it shows as <strong>Over</strong>.
@@ -174,6 +182,19 @@ export default function FlavoursPage() {
         <div className={styles.notice}>View only. Ask the Super Admin to switch on “Allowed to edit” to add or remove flavours.</div>
       )}
 
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0 0 1.25rem' }}>
+        {TABS.map(t => (
+          <button key={t.id} className={tab === t.id ? styles.primary : styles.secondary} onClick={() => setTab(t.id)}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === 'sizes' && (
+        <BRSettings part="sizes" canEdit={canEdit} onChanged={load}
+          currentTares={flavours.filter(f => f.is_active).map(f => Number(f.tare_grams))}
+          flavours={flavours.filter(f => f.is_active).map(f => ({ id: f.id, name: f.name }))} />
+      )}
+
+      {tab === 'flavours' && <>
       {canEdit && (
         <div className={styles.card}>
           <h2 className={styles.tierTitle}>Add a flavour <span className={styles.count}>Code {nextCode}</span></h2>
@@ -248,7 +269,7 @@ export default function FlavoursPage() {
                       aria-label={`${f.name} full box grams`}
                       value={boxEdits[f.id] ?? (f.full_box_grams ?? '').toString()}
                       onChange={e => setBoxEdits(b => ({ ...b, [f.id]: e.target.value }))}
-                      onBlur={() => { if (boxEdits[f.id] !== undefined) saveBoxWeight(f); }} /> g/box
+                      onBlur={() => { if (boxEdits[f.id] !== undefined) saveBoxWeight(f); }} /> g full box
                   </span>
                 ) : (
                   <span className={styles.meta}>{f.full_box_grams ? `${f.full_box_grams} g/box` : 'box weight not set'}</span>
@@ -280,7 +301,13 @@ export default function FlavoursPage() {
         );
       })}
 
-      <BRSettings canEdit={canEdit} flavours={flavours.filter(f => f.is_active).map(f => ({ id: f.id, name: f.name }))} />
+      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>tasting (g/day)</strong> = allowance before the flavour shows as Over. Changes save when you tap outside the box.</p>
+      </>}
+
+      {tab === 'matching' && (
+        <BRSettings part="matching" canEdit={canEdit} currentTares={[]}
+          flavours={flavours.filter(f => f.is_active).map(f => ({ id: f.id, name: f.name }))} />
+      )}
 
       {toast && <div className={`${styles.toast} ${toast.ok ? styles.ok : styles.err}`}>{toast.text}</div>}
     </div>
