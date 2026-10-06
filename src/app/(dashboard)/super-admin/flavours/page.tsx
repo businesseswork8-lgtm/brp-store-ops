@@ -17,6 +17,7 @@ type Flavour = {
   full_box_grams: number | null;
   tasting_allowance_grams: number;
   tare_grams: number;
+  rista_names: string;
 };
 type Tab = 'sizes' | 'flavours' | 'matching';
 const TABS: { id: Tab; label: string }[] = [
@@ -43,6 +44,7 @@ export default function FlavoursPage() {
   const [allBox, setAllBox] = useState('');
   const [tab, setTab] = useState<Tab>('sizes');
   const [allowEdits, setAllowEdits] = useState<Record<string, string>>({});
+  const [namesEdits, setNamesEdits] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
 
   const notify = (text: string, ok = true) => {
@@ -60,7 +62,7 @@ export default function FlavoursPage() {
     const tierList = (tierRows || []) as Tier[];
     const { data: flavourRows } = tierList.length
       ? await supabase.from('items')
-          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams, tasting_allowance_grams, tare_grams')
+          .select('id, code, name, sub_category, is_new, is_active, category_id, full_box_grams, tasting_allowance_grams, tare_grams, rista_names')
           .in('category_id', tierList.map(t => t.id))
           .order('name')
       : { data: [] };
@@ -126,6 +128,15 @@ export default function FlavoursPage() {
     if (error) { notify('Could not save: ' + error.message, false); return; }
     setBoxEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
     notify(`${f.name}: full box ${grams ?? '—'} g`);
+    load();
+  };
+
+  const saveRistaNames = async (f: Flavour) => {
+    const v = (namesEdits[f.id] ?? '').trim();
+    const { error } = await supabase.from('items').update({ rista_names: v }).eq('id', f.id);
+    if (error) { notify('Could not save: ' + error.message, false); return; }
+    setNamesEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
+    notify(`${f.name}: Rista names saved`);
     load();
   };
 
@@ -285,6 +296,13 @@ export default function FlavoursPage() {
                 ) : (
                   <span className={styles.meta}>{Number(f.tasting_allowance_grams) || 0} g tasting/day</span>
                 )}
+                {canEdit ? (
+                  <input className={styles.search} style={{ width: 200, minWidth: 0, flex: 'none' }} placeholder="Rista names (if different)"
+                    aria-label={`${f.name} other names in Rista`} title="Other names Rista uses for this flavour, comma separated (e.g. vanilla)"
+                    value={namesEdits[f.id] ?? (f.rista_names || '')}
+                    onChange={e => setNamesEdits(a => ({ ...a, [f.id]: e.target.value }))}
+                    onBlur={() => { if (namesEdits[f.id] !== undefined) saveRistaNames(f); }} />
+                ) : f.rista_names ? <span className={styles.meta}>Rista: {f.rista_names}</span> : null}
                 {canEdit && (
                   <>
                     <button className={styles.secondary} onClick={() => toggleNew(f)}>
@@ -301,7 +319,7 @@ export default function FlavoursPage() {
         );
       })}
 
-      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>tasting (g/day)</strong> = allowance before the flavour shows as Over. Changes save when you tap outside the box.</p>
+      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>tasting (g/day)</strong> = allowance before the flavour shows as Over · <strong>Rista names</strong> = other names Rista uses for the flavour (e.g. &ldquo;vanilla&rdquo;). Changes save when you tap outside the box.</p>
       </>}
 
       {tab === 'matching' && (

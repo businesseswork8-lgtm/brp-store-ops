@@ -27,7 +27,9 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
   const [storeId, setStoreId] = useState('');
   const [lines, setLines] = useState<BRSalesLine[]>([]);
   const [linesErr, setLinesErr] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
+  const [view, setView] = useState<'none' | 'matched' | 'skipped' | 'all'>('none');
+  const [skipWords, setSkipWords] = useState<string | null>(null);
+  const [skipEdit, setSkipEdit] = useState<string | null>(null);
   const [pick, setPick] = useState<Record<string, { item: string; size: string }>>({});
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [sizesErr, setSizesErr] = useState<string | null>(null);
@@ -49,7 +51,22 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
     setLines(((data || []) as BRSalesLine[]).map(l => ({ ...l, quantity: Number(l.quantity), grams: Number(l.grams) })));
   }, [supabase, storeId]);
 
+  const loadSkip = useCallback(async () => {
+    const { data } = await supabase.from('br_settings').select('skip_words').eq('brand_id', BR_BRAND_ID).maybeSingle();
+    setSkipWords(data ? data.skip_words : null);
+  }, [supabase]);
+
+  const saveSkip = async () => {
+    if (skipEdit === null) return;
+    const { error } = await supabase.from('br_settings').upsert({ brand_id: BR_BRAND_ID, skip_words: skipEdit, updated_at: new Date().toISOString() });
+    if (error) { notify('Could not save: ' + error.message, false); return; }
+    setSkipEdit(null);
+    notify('Skip words saved');
+    loadSkip(); loadLines();
+  };
+
   useEffect(() => {
+    loadSkip();
     loadSizes();
     supabase.from('stores').select('id, name').eq('brand_id', BR_BRAND_ID).eq('is_active', true).order('name')
       .then(({ data }) => { setStores(data || []); setStoreId(s => s || data?.[0]?.id || ''); });
@@ -128,7 +145,14 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
   };
 
   const unmatched = lines.filter(l => l.matched_by === 'none');
-  const shownLines = showAll ? lines : unmatched;
+  const VIEWS = {
+    none: (l: BRSalesLine) => l.matched_by === 'none',
+    matched: (l: BRSalesLine) => l.matched_by === 'auto' || l.matched_by === 'saved',
+    skipped: (l: BRSalesLine) => ['skipped', 'ignored', 'no_flavour'].includes(l.matched_by),
+    all: () => true,
+  };
+  const shownLines = lines.filter(VIEWS[view]);
+  const countOf = (v: keyof typeof VIEWS) => lines.filter(VIEWS[v]).length;
   const activeSizes = sizes.filter(z => z.is_active);
 
   return (
@@ -194,6 +218,22 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
           </div>
         )}
       </div>
+
+      <div className={styles.card}>
+        <h2 className={styles.tierTitle}>Not from bulk boxes <span className={styles.count}>Rista lines with these words are skipped</span></h2>
+        <p className={styles.subtitle} style={{ marginTop: 0 }}>
+          Sealed packs, cakes, stick bars, cones… don&apos;t come out of your bulk boxes, so they are not counted.
+          Comma separated, whole words (&ldquo;cake&rdquo; does not skip &ldquo;cheesecake&rdquo;). A single symbol like @ skips any line containing it.
+        </p>
+        {skipWords === null ? <div className={styles.notice}>Not set up yet — run the 012 SQL in Supabase.</div> : canEdit ? (
+          <div className={styles.formGrid}>
+            <label className={styles.field} style={{ gridColumn: '1 / -1' }}>Skip words
+              <input value={skipEdit ?? skipWords} onChange={e => setSkipEdit(e.target.value)} />
+            </label>
+            {skipEdit !== null && <button className={styles.primary} onClick={saveSkip}>Save skip words</button>}
+          </div>
+        ) : <p className={styles.subtitle}>{skipWords || '—'}</p>}
+      </div>
       </>}
 
       {part === 'matching' && <div className={styles.card}>
@@ -201,20 +241,24 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
           Rista sales → flavour <span className={styles.count}>last 45 days of Sales By Items · {unmatched.length} not matched</span>
         </h2>
         <p className={styles.subtitle} style={{ marginTop: 0 }}>
-          Lines that name one flavour and one size are matched automatically. Match the rest once here — the app remembers.
-          Lines that aren&apos;t ice cream (cones, toppings, drinks): mark &ldquo;Not ice cream&rdquo;.
+          Lines that name one flavour and one size are counted automatically. &ldquo;Needs you&rdquo; = a flavour was found but not the size
+          (milkshakes, sundaes…): pick the size it uses, or &ldquo;Not ice cream&rdquo;. The app remembers.
+          An ice cream flavour under &ldquo;Not counted&rdquo;? Add it on the Flavours tab, or put Rista&apos;s name for it in that flavour&apos;s &ldquo;Rista names&rdquo;.
         </p>
         <div className={styles.toolbar}>
           <select className={styles.search} style={{ flex: 'none', width: 220 }} value={storeId} onChange={e => setStoreId(e.target.value)}>
             {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <label className={`${styles.field} ${styles.check}`} style={{ paddingBottom: 0 }}>
-            <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> Show matched lines too
-          </label>
+          <select className={styles.search} style={{ flex: 'none', width: 260 }} value={view} onChange={e => setView(e.target.value as typeof view)}>
+            <option value="none">Needs you ({countOf('none')})</option>
+            <option value="matched">Counted ({countOf('matched')})</option>
+            <option value="skipped">Not counted: packs, cones, other items ({countOf('skipped')})</option>
+            <option value="all">Everything ({lines.length})</option>
+          </select>
         </div>
         {linesErr && <div className={styles.notice}>Could not load sales lines: {linesErr}</div>}
         {!linesErr && lines.length === 0 && <p className={styles.subtitle}>No Sales By Items uploaded for this store in the last 45 days.</p>}
-        {!linesErr && lines.length > 0 && shownLines.length === 0 && <p className={styles.subtitle}>✅ Every sales line is matched.</p>}
+        {!linesErr && lines.length > 0 && shownLines.length === 0 && <p className={styles.subtitle}>{view === 'none' ? '✅ Nothing needs you.' : 'No lines here.'}</p>}
         {shownLines.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
@@ -233,7 +277,9 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                           {[l.item_type, l.category].filter(Boolean).join(' · ')}
                           {l.matched_by === 'auto' && ' · matched automatically'}{l.matched_by === 'saved' && ' · saved match'}
-                          {l.matched_by === 'ignored' && ' · not ice cream'}
+                          {l.matched_by === 'ignored' && ' · you said not ice cream'}
+                          {l.matched_by === 'skipped' && ' · skipped (sealed pack / not from bulk)'}
+                          {l.matched_by === 'no_flavour' && ' · no flavour name found'}
                         </div>
                       </td>
                       <td style={td} align="right">{l.quantity}</td>

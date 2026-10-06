@@ -22,7 +22,7 @@ const inr = (n: number) => `₹ ${n.toLocaleString('en-IN', { maximumFractionDig
 const norm = (s: string | null | undefined) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 export default function UploadPage() {
-  const { supabase, store } = useActiveStore();
+  const { supabase, store, profile, reload } = useActiveStore();
   const [files, setFiles] = useState<Parsed[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [audit, setAudit] = useState<MonthEnd | null>(null);
@@ -245,6 +245,21 @@ export default function UploadPage() {
       {problems.length > 0 && (
         <div className={`${styles.alert} ${styles.error}`}>
           {problems.map((p, i) => <div key={i}>⚠ {p}</div>)}
+          {store && !store.rista_branch_name && profile?.role === 'super_admin' && (() => {
+            // First upload for a store: let the Super Admin take the branch name from the file itself
+            const fromFile = files.find(f => f.branch)?.branch || usage?.branch;
+            if (!fromFile) return null;
+            return (
+              <button type="button" className={styles.saveButton} style={{ marginTop: '0.75rem' }}
+                onClick={async () => {
+                  if (!confirm(`Set the Rista branch name of ${store.name} to "${fromFile}"? Files from any other branch will then be refused for this store.`)) return;
+                  const { error } = await supabase.from('stores').update({ rista_branch_name: fromFile }).eq('id', store.id);
+                  if (error) alert('Could not save: ' + error.message); else await reload();
+                }}>
+                Use &ldquo;{fromFile}&rdquo; as {store.name}&apos;s Rista branch name
+              </button>
+            );
+          })()}
         </div>
       )}
 

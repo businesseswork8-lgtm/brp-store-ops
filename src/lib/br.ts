@@ -20,7 +20,7 @@ export type BRReportRow = {
 export type BRSalesLine = {
   sales_key: string; item_name: string; variant: string; item_type: string; category: string; quantity: number;
   item_id: string | null; flavour_name: string | null; size_id: string | null; size_name: string | null;
-  grams_each: number | null; grams: number; matched_by: 'saved' | 'auto' | 'ignored' | 'none';
+  grams_each: number | null; grams: number; matched_by: 'saved' | 'auto' | 'ignored' | 'skipped' | 'no_flavour' | 'none';
 };
 
 export const BR_STATUS: Record<BRReportRow['status'], { label: string; cls: 'badgeDanger' | 'badgeSuccess' | 'badgeDefault'; help: string }> = {
