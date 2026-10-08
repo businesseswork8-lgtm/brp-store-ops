@@ -206,6 +206,20 @@ export interface VarianceRecord {
   store?: Store
 }
 
+export interface DailyCashTransaction {
+  id: string
+  store_id: string
+  entry_date: string
+  tx_type: 'expense' | 'bank_deposit'
+  amount: number
+  category: string
+  description: string | null
+  staff_member_id: string | null
+  submitted_by_profile_id: string
+  created_at: string
+  staff_member?: StaffMember
+}
+
 // Form helpers
 export interface CashDenominations {
   denomination_2000: number

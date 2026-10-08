@@ -85,12 +85,8 @@ export default function UploadPage() {
     }
     if (summary && items) {
       const diff = Math.abs(summary.summary.net_sales - items.summary.net_sales);
-      // Hard block only if difference is large (greater than ₹100 AND >2% of net sales) indicating different days
-      const maxTolerance = Math.max(100, (summary.summary.net_sales || 1) * 0.02);
-      if (diff > maxTolerance) {
-        problems.push(`The two files don't match: Sales Summary net sales ${inr(summary.summary.net_sales)}, Sales By Items ${inr(items.summary.net_sales)} (diff ${inr(diff)}). They are probably from different days — please download both for the same day.`);
-      } else if (diff > 1) {
-        notices.push(`Minor net sales difference: Sales Summary ${inr(summary.summary.net_sales)} vs Sales By Items ${inr(items.summary.net_sales)} (diff ${inr(diff)}). This is common due to bill discounts or tax rounding in Rista. Both files will be saved.`);
+      if (diff > 1) {
+        problems.push(`The two files don't match: Sales Summary net sales ${inr(summary.summary.net_sales)}, Sales By Items ${inr(items.summary.net_sales)} (diff ${inr(diff)}). Since Rista bifurcates discounts, net sales must match. Please verify both files are for the same date.`);
       }
     }
     if (summary?.date && summary.date > istDate()) problems.push('The Sales Summary date is in the future.');

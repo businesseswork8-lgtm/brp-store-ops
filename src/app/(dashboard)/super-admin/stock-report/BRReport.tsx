@@ -113,12 +113,29 @@ export function BRReport() {
 
   useEffect(() => { load(); }, [load]);
 
-  const counted = rows.filter(r => r.status !== 'NOT_COUNTED');
-  const over = rows.filter(r => r.status === 'OVER');
-  const overGrams = over.reduce((t, r) => t + Math.max(0, (r.gap || 0) - r.allowance), 0);
+  const effectiveAllowance = (r: BRReportRow) => (r.allowance > 0 ? r.allowance : Math.round(r.sold * 0.05));
+
+  const rowsWithCalc = rows.map(r => {
+    const allow = effectiveAllowance(r);
+    const gap = r.gap ?? 0;
+    const isCounted = r.opening !== null && r.closing !== null;
+    const isOver = isCounted && gap > allow;
+    const shortageGrams = isOver ? gap - allow : 0;
+    return {
+      ...r,
+      calculatedAllowance: allow,
+      shortageGrams,
+      computedStatus: (!isCounted ? 'NOT_COUNTED' : isOver ? 'OVER' : gap < -allow ? 'CHECK' : 'OK') as BRReportRow['status'],
+    };
+  });
+
+  const counted = rowsWithCalc.filter(r => r.opening !== null && r.closing !== null);
+  const over = rowsWithCalc.filter(r => r.shortageGrams > 0);
+  const totalShortageGrams = over.reduce((t, r) => t + r.shortageGrams, 0);
+  const totalAllowanceGrams = rowsWithCalc.reduce((t, r) => t + r.calculatedAllowance, 0);
   const noSales = rows.some(r => r.status === 'NO_SALES');
   const overnight = rows.filter(r => r.overnight_change !== null && r.overnight_change < -50);
-  const shown = onlyProblems ? rows.filter(r => r.status === 'OVER' || r.status === 'CHECK' || (r.overnight_change ?? 0) < -50) : rows;
+  const shown = onlyProblems ? rowsWithCalc.filter(r => r.computedStatus === 'OVER' || r.computedStatus === 'CHECK' || (r.overnight_change ?? 0) < -50) : rowsWithCalc;
   const totalSold = rows.reduce((t, r) => t + r.sold, 0);
 
   // Current inventory totals
@@ -263,21 +280,102 @@ export function BRReport() {
           </div>
 
           <div className={styles.statGrid} style={{ marginBottom: '1.25rem' }}>
-            <div className={styles.statCard}><div className={styles.statLabel}>Flavours with Opening Count</div><div className={styles.statValue}>{rows.filter(r => r.opening !== null).length} / {rows.length}</div></div>
-            <div className={styles.statCard}><div className={styles.statLabel}>Flavours with Closing Count</div><div className={styles.statValue}>{rows.filter(r => r.closing !== null).length} / {rows.length}</div></div>
-            <div className={styles.statCard}><div className={styles.statLabel}>Sold (from Sales By Items)</div><div className={styles.statValue}>{grams(totalSold)}</div></div>
             <div className={styles.statCard}>
-              <div className={styles.statLabel}>Flavours over allowance</div>
-              <div className={styles.statValue} style={{ color: over.length ? 'var(--danger)' : undefined }}>
-                {over.length}
-                {overGrams > 0 && (
-                  <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--danger)', marginLeft: '0.5rem' }}>
-                    ({grams(overGrams)} shortage)
-                  </span>
-                )}
+              <div className={styles.statLabel}>Overall Ice Cream Shortage</div>
+              <div className={styles.statValue} style={{ color: totalShortageGrams > 0 ? 'var(--danger)' : 'var(--success)' }}>
+                {totalShortageGrams > 0
+                  ? totalShortageGrams >= 1000
+                    ? `${(totalShortageGrams / 1000).toFixed(2)} kg`
+                    : `${Math.round(totalShortageGrams)} g`
+                  : '0 g (None)'}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                {over.length > 0 ? `${over.length} flavour${over.length > 1 ? 's' : ''} with excess loss` : 'All flavours within allowance'}
+              </div>
+            </div>
+
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Sold (POS Items)</div>
+              <div className={styles.statValue}>{grams(totalSold)}</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                {(totalSold / 1000).toFixed(2)} kg billed in Rista
+              </div>
+            </div>
+
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Total Tasting Allowance (5%)</div>
+              <div className={styles.statValue}>{grams(totalAllowanceGrams)}</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                5% volume-proportional tasting
+              </div>
+            </div>
+
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Counting Progress</div>
+              <div className={styles.statValue}>
+                {rowsWithCalc.filter(r => r.closing !== null).length} / {rows.length}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                flavours weighed at night closing
               </div>
             </div>
           </div>
+
+          {/* Detailed Shortage Bifurcation by Flavour */}
+          {over.length > 0 && (
+            <div className={styles.card} style={{ marginBottom: '1.5rem', border: '1px solid rgba(255,23,68,0.3)', background: 'rgba(255,23,68,0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, color: 'var(--danger)', fontSize: '1.15rem' }}>
+                    🚨 Detailed Shortage Bifurcation by Flavour ({totalShortageGrams >= 1000 ? `${(totalShortageGrams / 1000).toFixed(2)} kg` : `${Math.round(totalShortageGrams)} g`} total)
+                  </h3>
+                  <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    Consumption exceeded POS sales + 5% tasting allowance. Ranked by highest loss (grams &amp; kg):
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Flavour</th>
+                      <th>Used from Tub</th>
+                      <th>Sold (POS)</th>
+                      <th>5% Tasting Allowance</th>
+                      <th>Wasted</th>
+                      <th>Shortage (g)</th>
+                      <th>Shortage (kg)</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {over.sort((a, b) => b.shortageGrams - a.shortageGrams).map(r => (
+                      <tr key={r.item_id} style={{ background: 'rgba(255,23,68,0.05)' }}>
+                        <td style={{ fontWeight: 600 }}>
+                          {r.flavour}
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div>
+                        </td>
+                        <td>{grams(r.used)}</td>
+                        <td>{grams(r.sold)}</td>
+                        <td>{grams(r.calculatedAllowance)}</td>
+                        <td>{r.wasted ? grams(r.wasted) : '—'}</td>
+                        <td style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.05rem' }}>
+                          +{grams(r.shortageGrams)}
+                        </td>
+                        <td style={{ fontWeight: 700, color: 'var(--danger)' }}>
+                          +{(r.shortageGrams / 1000).toFixed(3)} kg
+                        </td>
+                        <td>
+                          <span className={styles.badgeDanger}>⚠ OVER LIMIT</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {error && <div className={styles.card} style={{ color: 'var(--danger)' }}>Could not load: {error}</div>}
           {noSales && <div className={styles.card} style={{ color: 'var(--warning)' }}>⚠ Sales By Items is not uploaded for {fmtDate(date)} — sold is 0, so flavour sales consumption is pending.</div>}
@@ -303,12 +401,12 @@ export function BRReport() {
                 <thead>
                   <tr>
                     <th>Flavour</th><th>Opening</th><th>Received</th><th>Closing</th><th>Used</th>
-                    <th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance</th><th>Overnight</th><th>Status</th>
+                    <th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance (5%)</th><th>Overnight</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map(r => {
-                    const st = BR_STATUS[r.status] || { label: r.status, cls: 'badgeDefault', help: '' };
+                    const st = BR_STATUS[r.computedStatus] || { label: r.computedStatus, cls: 'badgeDefault', help: '' };
                     return (
                       <tr key={r.item_id}>
                         <td style={{ fontWeight: 600 }}>{r.flavour}<div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div></td>
@@ -318,8 +416,8 @@ export function BRReport() {
                         <td>{r.used !== null ? grams(r.used) : '—'}</td>
                         <td>{grams(r.sold)}</td>
                         <td>{r.wasted ? grams(r.wasted) : '—'}</td>
-                        <td style={{ fontWeight: 600, color: r.status === 'OVER' ? 'var(--danger)' : undefined }}>{signedGrams(r.gap)}</td>
-                        <td>{grams(r.allowance)}</td>
+                        <td style={{ fontWeight: 600, color: r.computedStatus === 'OVER' ? 'var(--danger)' : undefined }}>{signedGrams(r.gap)}</td>
+                        <td>{grams(r.calculatedAllowance)}</td>
                         <td style={{ color: (r.overnight_change ?? 0) < -50 ? 'var(--warning)' : undefined }}>{signedGrams(r.overnight_change)}</td>
                         <td><span className={styles[st.cls]} title={st.help}>{st.label}</span></td>
                       </tr>

@@ -16,10 +16,10 @@ export default function EODReportPage() {
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
   const [loading, setLoading] = useState(true);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [posSales, setPosSales] = useState<any>(null);
   const [morningCash, setMorningCash] = useState<number | null>(null);
   const [eveningCash, setEveningCash] = useState<number | null>(null);
+  const [cashTransactions, setCashTransactions] = useState<any[]>([]);
   const [wastageCount, setWastageCount] = useState(0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [varianceAlerts, setVarianceAlerts] = useState<any[]>([]);
@@ -32,9 +32,16 @@ export default function EODReportPage() {
     setLoading(true);
     const storeId = activeStore.id;
 
-    const [{ data: salesData }, { data: cash }, { data: wastage }, { data: rpcData, error: rpcErr }] = await Promise.all([
+    const [
+      { data: salesData },
+      { data: cash },
+      { data: txs },
+      { data: wastage },
+      { data: rpcData, error: rpcErr }
+    ] = await Promise.all([
       supabase.from('daily_sales_summary').select('*').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
       supabase.from('daily_cash_tally').select('tally_type, total_amount').eq('store_id', storeId).eq('entry_date', selectedDate),
+      supabase.from('daily_cash_transactions').select('*').eq('store_id', storeId).eq('entry_date', selectedDate),
       supabase.from('daily_wastage_log').select('id').eq('store_id', storeId).eq('entry_date', selectedDate),
       supabase.rpc('stock_variance_report', { p_store_id: storeId, p_from: null, p_to: selectedDate }),
     ]);
@@ -48,6 +55,7 @@ export default function EODReportPage() {
     const e = cash?.find(c => c.tally_type === 'evening');
     setMorningCash(m ? Number(m.total_amount) : null);
     setEveningCash(e ? Number(e.total_amount) : null);
+    setCashTransactions(txs || []);
     setWastageCount(wastage?.length || 0);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = ((rpcData as any[]) || []);
@@ -66,8 +74,18 @@ export default function EODReportPage() {
 
   useEffect(() => { loadStoreData(); }, [loadStoreData]);
 
-  // Cash check: morning cash + cash sales should equal evening cash
-  const expectedCash = morningCash !== null && posSales ? morningCash + Number(posSales.cash_amount || 0) : null;
+  const expensesTotal = cashTransactions
+    .filter(t => t.tx_type === 'expense')
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+
+  const depositsTotal = cashTransactions
+    .filter(t => t.tx_type === 'bank_deposit')
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+
+  // Cash check: morning cash + cash sales - expenses - bank deposits should equal evening cash
+  const expectedCash = morningCash !== null && posSales
+    ? morningCash + Number(posSales.cash_amount || 0) - expensesTotal - depositsTotal
+    : null;
   const cashDiff = expectedCash !== null && eveningCash !== null ? eveningCash - expectedCash : null;
   const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 
@@ -221,6 +239,35 @@ export default function EODReportPage() {
               </div>
             </div>
 
+            {/* Expenses & Deposits Summary */}
+            {(expensesTotal > 0 || depositsTotal > 0) && (
+              <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div style={{ padding: '0.75rem 1rem', background: 'rgba(255,23,68,0.06)', border: '1px solid rgba(255,23,68,0.2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Daily Cash Expenses (Tea, etc.)</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--danger)', marginTop: '0.2rem' }}>
+                    - {formatCurrency(expensesTotal)}
+                  </div>
+                  {cashTransactions.filter(t => t.tx_type === 'expense').length > 0 && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                      {cashTransactions.filter(t => t.tx_type === 'expense').map(t => `${t.category}: ₹${t.amount}`).join(', ')}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ padding: '0.75rem 1rem', background: 'rgba(255,214,0,0.06)', border: '1px solid rgba(255,214,0,0.2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Bank Cash Deposits</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--warning)', marginTop: '0.2rem' }}>
+                    - {formatCurrency(depositsTotal)}
+                  </div>
+                  {cashTransactions.filter(t => t.tx_type === 'bank_deposit').length > 0 && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                      {cashTransactions.filter(t => t.tx_type === 'bank_deposit').map(t => `${t.category}: ₹${t.amount}`).join(', ')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{ marginTop: '1rem', padding: '1rem', borderRadius: '8px', background: 'var(--bg-secondary)' }}>
               {cashDiff === null ? (
                 <span style={{ color: 'var(--text-secondary)' }}>
@@ -229,7 +276,10 @@ export default function EODReportPage() {
               ) : (
                 <>
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                    Morning {formatCurrency(morningCash)} + cash sales {formatCurrency(posSales.cash_amount)} = expected {formatCurrency(expectedCash)}
+                    Morning {formatCurrency(morningCash)} + cash sales {formatCurrency(posSales.cash_amount)}
+                    {expensesTotal > 0 ? ` − expenses ${formatCurrency(expensesTotal)}` : ''}
+                    {depositsTotal > 0 ? ` − bank deposit ${formatCurrency(depositsTotal)}` : ''}
+                    {' '}= expected {formatCurrency(expectedCash)}
                   </div>
                   <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '0.25rem',
                     color: Math.abs(cashDiff) < 1 ? 'var(--success)' : cashDiff < 0 ? 'var(--danger)' : 'var(--warning)' }}>
@@ -237,7 +287,7 @@ export default function EODReportPage() {
                       : cashDiff < 0 ? `⚠ Short by ${formatCurrency(-cashDiff)}` : `Extra ${formatCurrency(cashDiff)}`}
                   </div>
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-                    Note: cash paid out or deposited during the day is not tracked yet.
+                    ✓ Shift expenses &amp; bank deposits are accounted for in expected cash.
                   </div>
                 </>
               )}
@@ -247,32 +297,57 @@ export default function EODReportPage() {
 
           {/* Section 3 (Baskin Robbins): ice cream per flavour */}
           {brRows && (() => {
-            const counted = brRows.filter(r => r.status !== 'NOT_COUNTED').length;
-            const bad = brRows.filter(r => r.status === 'OVER' || r.status === 'CHECK');
+            const effectiveAllow = (r: BRReportRow) => (r.allowance > 0 ? r.allowance : Math.round(r.sold * 0.05));
+            const counted = brRows.filter(r => r.opening !== null && r.closing !== null).length;
+            const bad = brRows.filter(r => {
+              const allow = effectiveAllow(r);
+              const gap = r.gap ?? 0;
+              return r.opening !== null && r.closing !== null && (gap > allow || gap < -allow);
+            });
+            const totalShortage = brRows.reduce((sum, r) => {
+              const allow = effectiveAllow(r);
+              const gap = r.gap ?? 0;
+              return sum + (r.opening !== null && r.closing !== null && gap > allow ? gap - allow : 0);
+            }, 0);
             const noSales = brRows.some(r => r.status === 'NO_SALES');
             return (
               <div className={styles.card}>
-                <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Ice Cream</h3>
-                <div style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                  {counted} of {brRows.length} flavours weighed at opening and closing.
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <h3 style={{ margin: 0, color: 'var(--accent-primary)' }}>3. Ice Cream Stock &amp; Shortage</h3>
+                  {totalShortage > 0 && (
+                    <span style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.05rem' }}>
+                      Overall Shortage: {totalShortage >= 1000 ? `${(totalShortage / 1000).toFixed(2)} kg` : `${Math.round(totalShortage)} g`}
+                    </span>
+                  )}
+                </div>
+                <div style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                  {counted} of {brRows.length} bulk flavours weighed at opening and closing. 5% tasting allowance applied proportional to sales.
                 </div>
                 {noSales ? (
                   <div style={{ color: 'var(--warning)' }}>⚠ Sales By Items not uploaded for {selectedDate} — flavours can&apos;t be checked yet.</div>
                 ) : counted === 0 ? null : bad.length === 0 ? (
-                  <div style={{ color: 'var(--success)' }}>✓ Every weighed flavour is within its tasting allowance.</div>
+                  <div style={{ color: 'var(--success)' }}>✓ Every weighed flavour is within its 5% tasting allowance! (0 g shortage)</div>
                 ) : (
                   <table className={styles.table}>
-                    <thead><tr><th>Flavour</th><th>Used</th><th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Flavour</th><th>Used</th><th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance (5%)</th><th>Shortage</th><th>Status</th></tr></thead>
                     <tbody>
-                      {bad.map(r => (
-                        <tr key={r.item_id} style={{ background: r.status === 'OVER' ? 'rgba(255,23,68,0.08)' : undefined }}>
-                          <td style={{ fontWeight: 600 }}>{r.flavour}</td>
-                          <td>{grams(r.used)}</td><td>{grams(r.sold)}</td><td>{r.wasted ? grams(r.wasted) : '—'}</td>
-                          <td style={{ fontWeight: 700, color: r.status === 'OVER' ? 'var(--danger)' : undefined }}>{signedGrams(r.gap)}</td>
-                          <td>{grams(r.allowance)}</td>
-                          <td><span className={r.status === 'OVER' ? styles.badgeDanger : styles.badge}>{r.status === 'OVER' ? '⚠ Over' : 'Check count'}</span></td>
-                        </tr>
-                      ))}
+                      {bad.map(r => {
+                        const allow = effectiveAllow(r);
+                        const gap = r.gap ?? 0;
+                        const shortage = gap > allow ? gap - allow : 0;
+                        return (
+                          <tr key={r.item_id} style={{ background: shortage > 0 ? 'rgba(255,23,68,0.08)' : undefined }}>
+                            <td style={{ fontWeight: 600 }}>{r.flavour}</td>
+                            <td>{grams(r.used)}</td><td>{grams(r.sold)}</td><td>{r.wasted ? grams(r.wasted) : '—'}</td>
+                            <td style={{ fontWeight: 700, color: shortage > 0 ? 'var(--danger)' : undefined }}>{signedGrams(r.gap)}</td>
+                            <td>{grams(allow)}</td>
+                            <td style={{ fontWeight: 700, color: shortage > 0 ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                              {shortage > 0 ? `+${grams(shortage)}` : '0 g'}
+                            </td>
+                            <td><span className={shortage > 0 ? styles.badgeDanger : styles.badge}>{shortage > 0 ? '⚠ Over' : 'Check count'}</span></td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
