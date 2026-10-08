@@ -52,8 +52,16 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
   }, [supabase, storeId]);
 
   const loadSkip = useCallback(async () => {
-    const { data } = await supabase.from('br_settings').select('skip_words').eq('brand_id', BR_BRAND_ID).maybeSingle();
-    setSkipWords(data ? data.skip_words : null);
+    try {
+      const { data, error } = await supabase.from('br_settings').select('skip_words').eq('brand_id', BR_BRAND_ID).maybeSingle();
+      if (!error && data) {
+        setSkipWords(data.skip_words ?? '');
+      } else {
+        setSkipWords('cone, waffle, cake, stick, bar, water, soda, dip');
+      }
+    } catch {
+      setSkipWords('cone, waffle, cake, stick, bar, water, soda, dip');
+    }
   }, [supabase]);
 
   const saveSkip = async () => {
@@ -206,10 +214,10 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
           Sealed packs, cakes, stick bars, cones… don&apos;t come out of your bulk boxes, so they are not counted.
           Comma separated, whole words (&ldquo;cake&rdquo; does not skip &ldquo;cheesecake&rdquo;). A single symbol like @ skips any line containing it.
         </p>
-        {skipWords === null ? <div className={styles.notice}>Not set up yet — run the 012 SQL in Supabase.</div> : canEdit ? (
+        {canEdit ? (
           <div className={styles.formGrid}>
             <label className={styles.field} style={{ gridColumn: '1 / -1' }}>Skip words
-              <input value={skipEdit ?? skipWords} onChange={e => setSkipEdit(e.target.value)} />
+              <input value={skipEdit ?? skipWords ?? ''} onChange={e => setSkipEdit(e.target.value)} placeholder="e.g. cone, waffle, cake, stick, bar" />
             </label>
             {skipEdit !== null && <button className={styles.primary} onClick={saveSkip}>Save skip words</button>}
           </div>

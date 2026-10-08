@@ -70,6 +70,7 @@ export default function UploadPage() {
 
   // ---- validation ----
   const problems: string[] = [];
+  const notices: string[] = [];
   if (store) {
     for (const f of files) {
       problems.push(...f.warnings.map(w => `${f.fileName}: ${w}`));
@@ -82,8 +83,15 @@ export default function UploadPage() {
         problems.push(`"${f.fileName}" is from "${f.branch}", but this store is ${store.name} ("${expected}"). Please download the report for this store.`);
       }
     }
-    if (summary && items && Math.abs(summary.summary.net_sales - items.summary.net_sales) > 1) {
-      problems.push(`The two files don't match: Sales Summary net sales ${inr(summary.summary.net_sales)}, Sales By Items ${inr(items.summary.net_sales)}. They are probably from different days — please download both for the same day.`);
+    if (summary && items) {
+      const diff = Math.abs(summary.summary.net_sales - items.summary.net_sales);
+      // Hard block only if difference is large (greater than ₹100 AND >2% of net sales) indicating different days
+      const maxTolerance = Math.max(100, (summary.summary.net_sales || 1) * 0.02);
+      if (diff > maxTolerance) {
+        problems.push(`The two files don't match: Sales Summary net sales ${inr(summary.summary.net_sales)}, Sales By Items ${inr(items.summary.net_sales)} (diff ${inr(diff)}). They are probably from different days — please download both for the same day.`);
+      } else if (diff > 1) {
+        notices.push(`Minor net sales difference: Sales Summary ${inr(summary.summary.net_sales)} vs Sales By Items ${inr(items.summary.net_sales)} (diff ${inr(diff)}). This is common due to bill discounts or tax rounding in Rista. Both files will be saved.`);
+      }
     }
     if (summary?.date && summary.date > istDate()) problems.push('The Sales Summary date is in the future.');
     if (usage) {
@@ -278,6 +286,12 @@ export default function UploadPage() {
 
       {message && (
         <div className={`${styles.alert} ${message.type === 'error' ? styles.error : styles.success}`}>{message.text}</div>
+      )}
+
+      {notices.length > 0 && (
+        <div className={styles.alert} style={{ background: 'rgba(255,214,0,0.1)', border: '1px solid var(--warning)', color: 'var(--text-primary)' }}>
+          {notices.map((n, i) => <div key={i}>ℹ️ {n}</div>)}
+        </div>
       )}
 
       {problems.length > 0 && (

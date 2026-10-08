@@ -37,8 +37,9 @@ export function boxNet(item: BoxItem, e: BoxEntry): { grams: number | null; erro
   if (gross > 0 && gross < EMPTY_BOX_GRAMS) {
     return { grams: null, error: `${item.name}: open box weighs less than an empty box (${EMPTY_BOX_GRAMS} g)` };
   }
-  if (gross > FULL_BOX_GRAMS + EMPTY_BOX_GRAMS) {
-    return { grams: null, error: `${item.name}: open box can't weigh more than a full box (${FULL_BOX_GRAMS + EMPTY_BOX_GRAMS} g)` };
+  // Allow reasonable overfill tolerance (up to 2800g gross) for factory overfilled tubs or lid packaging
+  if (gross > 2800) {
+    return { grams: null, error: `${item.name}: open box weight (${gross} g) is too high for a single box (max 2800 g)` };
   }
   const openNet = gross > 0 ? gross - EMPTY_BOX_GRAMS : 0;
   return { grams: unopened * FULL_BOX_GRAMS + openNet, error: null };

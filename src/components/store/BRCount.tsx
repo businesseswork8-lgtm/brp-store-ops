@@ -25,6 +25,7 @@ export function BRCount() {
   const [saved, setSaved] = useState<Record<Session, Set<string>>>({ opening: new Set(), closing: new Set() });
   const [savingId, setSavingId] = useState<string | null>(null);
   const [lastNight, setLastNight] = useState<Record<string, number>>({});
+  const [lastNightBoxes, setLastNightBoxes] = useState<Record<string, BoxEntry>>({});
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [staff, setStaff] = useState('');
   const [search, setSearch] = useState('');
@@ -35,6 +36,7 @@ export function BRCount() {
   const debounceTimers = useRef<Record<string, NodeJS.Timeout>>({});
   const staffRef = useRef(staff);
   staffRef.current = staff;
+  const hasInitializedSession = useRef(false);
 
   const today = istDate();
 
@@ -56,6 +58,7 @@ export function BRCount() {
     const e: Record<Session, Record<string, BoxEntry>> = { opening: {}, closing: {} };
     const s: Record<Session, Set<string>> = { opening: new Set(), closing: new Set() };
     const ln: Record<string, number> = {};
+    const lnB: Record<string, BoxEntry> = {};
     let savedStaff = '';
     (counts || []).forEach(c => {
       if (c.count_date === today) {
@@ -63,19 +66,29 @@ export function BRCount() {
         e[ses][c.item_id] = { unopened: String(c.unopened_boxes ?? 0), openGross: Number(c.open_box_gross) > 0 ? String(c.open_box_gross) : '' };
         s[ses].add(c.item_id);
         if (c.staff_member_id && !savedStaff) savedStaff = c.staff_member_id;
-      } else if (c.session === 'closing') ln[c.item_id] = Number(c.grams);
+      } else if (c.session === 'closing') {
+        ln[c.item_id] = Number(c.grams);
+        lnB[c.item_id] = { unopened: String(c.unopened_boxes ?? 0), openGross: Number(c.open_box_gross) > 0 ? String(c.open_box_gross) : '' };
+      }
     });
     setStaffList(st || []);
-    if (savedStaff && !staff) setStaff(savedStaff);
-    else if ((st || []).length === 1 && !staff) setStaff((st || [])[0].id);
+    if (savedStaff && !staffRef.current) setStaff(savedStaff);
+    else if ((st || []).length === 1 && !staffRef.current) setStaff((st || [])[0].id);
     setFlavours(list);
-    setEntries(e);
+    setEntries(prev => ({
+      opening: { ...e.opening, ...prev.opening },
+      closing: { ...e.closing, ...prev.closing },
+    }));
     setSaved(s);
     setLastNight(ln);
-    // Open the tab that still needs doing
-    setSession(list.length && s.opening.size >= list.length ? 'closing' : 'opening');
+    setLastNightBoxes(lnB);
+    // Open the tab that still needs doing only on first load
+    if (!hasInitializedSession.current && list.length > 0) {
+      hasInitializedSession.current = true;
+      setSession(s.opening.size >= list.length ? 'closing' : 'opening');
+    }
     setLoading(false);
-  }, [supabase, store, today, staff]);
+  }, [supabase, store, today]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -175,6 +188,102 @@ export function BRCount() {
     load();
   };
 
+  const fillEmptyWithZero = async () => {
+    if (!store) return;
+    const currentStaff = staffRef.current;
+    if (!currentStaff) {
+      showToast('Select who is weighing at the top first', 'error');
+      return;
+    }
+    const missing = flavours.filter(f => boxEntryEmpty(cur[f.id] || EMPTY));
+    if (!missing.length) {
+      showToast('All flavours already have an entry', 'success');
+      return;
+    }
+    const zeroEntry: BoxEntry = { unopened: '0', openGross: '' };
+    const updatedCur = { ...cur };
+    missing.forEach(f => {
+      updatedCur[f.id] = zeroEntry;
+    });
+    setEntries(x => ({ ...x, [session]: updatedCur }));
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const rows = missing.map(f => ({
+        store_id: store.id,
+        item_id: f.id,
+        count_date: today,
+        session,
+        unopened_boxes: 0,
+        open_box_gross: 0,
+        grams: 0,
+        staff_member_id: currentStaff,
+        submitted_by_profile_id: user?.id,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('br_flavour_counts').upsert(rows, { onConflict: 'store_id,item_id,count_date,session' });
+      if (!error) {
+        setSaved(prev => ({
+          ...prev,
+          [session]: new Set([...prev[session], ...missing.map(f => f.id)]),
+        }));
+        showToast(`Marked ${missing.length} unstocked flavour${missing.length > 1 ? 's' : ''} as 0`, 'success');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const copyLastNightToOpening = async () => {
+    if (!store) return;
+    const currentStaff = staffRef.current;
+    if (!currentStaff) {
+      showToast('Select who is weighing at the top first', 'error');
+      return;
+    }
+    const flavoursWithLastNight = flavours.filter(f => lastNightBoxes[f.id] !== undefined);
+    if (!flavoursWithLastNight.length) {
+      showToast('No closing counts found from last night', 'error');
+      return;
+    }
+    const updatedOpening = { ...entries.opening };
+    const rowsToSave: Array<Record<string, unknown>> = [];
+    const { data: { user } } = await supabase.auth.getUser();
+
+    flavoursWithLastNight.forEach(f => {
+      const b = lastNightBoxes[f.id];
+      updatedOpening[f.id] = b;
+      const r = boxNet(f, b);
+      if (r && !r.error && r.grams !== null) {
+        rowsToSave.push({
+          store_id: store.id,
+          item_id: f.id,
+          count_date: today,
+          session: 'opening',
+          unopened_boxes: Number(b.unopened) || 0,
+          open_box_gross: Number(b.openGross) || 0,
+          grams: r.grams,
+          staff_member_id: currentStaff,
+          submitted_by_profile_id: user?.id,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    });
+
+    setEntries(x => ({ ...x, opening: updatedOpening }));
+
+    if (rowsToSave.length > 0) {
+      const { error } = await supabase.from('br_flavour_counts').upsert(rowsToSave, { onConflict: 'store_id,item_id,count_date,session' });
+      if (!error) {
+        setSaved(prev => ({
+          ...prev,
+          opening: new Set([...prev.opening, ...flavoursWithLastNight.map(f => f.id)]),
+        }));
+        showToast(`Copied last night's closing for ${flavoursWithLastNight.length} flavours`, 'success');
+      }
+    }
+  };
+
   if (storeLoading || (loading && store)) return <div className={styles.spinner}></div>;
   if (!store) return <div className={styles.container}>No store is assigned to this login.</div>;
 
@@ -182,6 +291,7 @@ export function BRCount() {
   const shown = flavours.filter(f => !term || f.name.toLowerCase().includes(term));
   const ranges = Array.from(new Set(shown.map(f => f.item_categories.name)));
   const filled = flavours.filter(f => !boxEntryEmpty(cur[f.id] || EMPTY)).length;
+  const missingCount = flavours.length - filled;
   const total = flavours.reduce((t, f) => {
     const e = cur[f.id];
     if (!e || boxEntryEmpty(e)) return t;
@@ -230,6 +340,30 @@ export function BRCount() {
           {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <input className={styles.input} style={{ flex: 1, minWidth: 180 }} placeholder="Search flavour…" value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
+      {/* Helpful 1-click speed shortcuts */}
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', margin: '0.75rem 0 1rem' }}>
+        {missingCount > 0 && (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={fillEmptyWithZero}
+            style={{ fontSize: '0.82rem', padding: '0.45rem 0.8rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+          >
+            ⚡ Set {missingCount} unstocked flavour{missingCount > 1 ? 's' : ''} to 0 boxes
+          </button>
+        )}
+        {session === 'opening' && Object.keys(lastNightBoxes).length > 0 && (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={copyLastNightToOpening}
+            style={{ fontSize: '0.82rem', padding: '0.45rem 0.8rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+          >
+            📋 Copy last night&apos;s closing as opening
+          </button>
+        )}
       </div>
 
       {flavours.length === 0 && <p className={styles.statusText}>No flavours set up yet — ask your manager.</p>}

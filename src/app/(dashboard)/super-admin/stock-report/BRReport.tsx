@@ -268,7 +268,14 @@ export function BRReport() {
             <div className={styles.statCard}><div className={styles.statLabel}>Sold (from Sales By Items)</div><div className={styles.statValue}>{grams(totalSold)}</div></div>
             <div className={styles.statCard}>
               <div className={styles.statLabel}>Flavours over allowance</div>
-              <div className={styles.statValue} style={{ color: over.length ? 'var(--danger)' : undefined }}>{over.length}</div>
+              <div className={styles.statValue} style={{ color: over.length ? 'var(--danger)' : undefined }}>
+                {over.length}
+                {overGrams > 0 && (
+                  <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--danger)', marginLeft: '0.5rem' }}>
+                    ({grams(overGrams)} shortage)
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -277,7 +284,7 @@ export function BRReport() {
           {unmatched > 0 && (
             <div className={styles.card}>
               ⚠ {unmatched} Rista sales line(s) on this day aren&apos;t matched to a flavour + size.{' '}
-              <Link href="/super-admin/items" className={styles.secondaryButton}>Match them in Items</Link>
+              <Link href="/super-admin/items?brand=br&tab=matching" className={styles.secondaryButton}>Match them in Items</Link>
             </div>
           )}
           {overnight.length > 0 && (

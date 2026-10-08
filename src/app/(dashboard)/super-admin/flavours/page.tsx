@@ -30,11 +30,11 @@ const SUB_CATEGORIES = ['Fruits', 'Classics & Nuts', 'Chocolates'];
 const BR_BRAND_ID = '22222222-2222-2222-2222-222222222222';
 import { EMPTY_BOX_GRAMS, FULL_BOX_GRAMS } from "@/lib/icecream";
 
-export function FlavoursContent() {
-  return <FlavoursPage />;
+export function FlavoursContent({ initialTab }: { initialTab?: Tab }) {
+  return <FlavoursPage initialTab={initialTab} />;
 }
 
-export default function FlavoursPage() {
+export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
   const [supabase] = useState(() => createClient());
   const [tiers, setTiers] = useState<Tier[]>([]);
   const [flavours, setFlavours] = useState<Flavour[]>([]);
@@ -44,7 +44,7 @@ export default function FlavoursPage() {
   const [search, setSearch] = useState('');
   const [showRemoved, setShowRemoved] = useState(false);
   const [form, setForm] = useState({ name: '', category_id: '', sub_category: SUB_CATEGORIES[0], is_new: true });
-  const [tab, setTab] = useState<Tab>('sizes');
+  const [tab, setTab] = useState<Tab>(initialTab || 'sizes');
   const [allowEdits, setAllowEdits] = useState<Record<string, string>>({});
   const [namesEdits, setNamesEdits] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);

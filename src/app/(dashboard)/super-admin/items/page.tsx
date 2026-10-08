@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { istDate } from '@/lib/dates';
 import { Frequency, FREQUENCY_LABEL } from '@/lib/stock/schedule';
@@ -40,9 +41,21 @@ function groupOf(categoryName: string): string {
 const blankForm = { name: '', category_id: '', rista_sku: '', rista_unit: 'kg', rate: '', count_frequency: 'daily' as Frequency };
 
 export default function ItemsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center' }}>Loading…</div>}>
+      <ItemsPageInner />
+    </Suspense>
+  );
+}
+
+function ItemsPageInner() {
+  const searchParams = useSearchParams();
+  const brandParam = searchParams.get('brand');
+  const tabParam = (searchParams.get('tab') as 'sizes' | 'flavours' | 'matching' | null) || undefined;
+
   const [supabase] = useState(() => createClient());
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [brandId, setBrandId] = useState('');
+  const [brandId, setBrandId] = useState(() => brandParam === 'br' ? BR_BRAND_ID : '');
   const [categories, setCategories] = useState<Category[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -73,12 +86,15 @@ export default function ItemsPage() {
     ]);
     setCanEdit(prof?.role === 'super_admin' || (prof?.role === 'admin' && Boolean(prof?.can_edit)));
     setBrands(b || []);
-    setBrandId(prev => prev || b?.[0]?.id || '');
+    setBrandId(prev => {
+      if (brandParam === 'br') return BR_BRAND_ID;
+      return prev || b?.[0]?.id || '';
+    });
     setCategories((c || []) as Category[]);
     setStores((s || []) as Store[]);
     setItems(((i || []) as Item[]).map(x => ({ ...x, tare_grams: Number(x.tare_grams) || 0 })));
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, brandParam]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -304,7 +320,7 @@ export default function ItemsPage() {
       </div>
 
       {isBRSelected ? (
-        <FlavoursContent />
+        <FlavoursContent initialTab={tabParam} />
       ) : (
         <>
       <div className={styles.header}>

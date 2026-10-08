@@ -24,6 +24,7 @@ export default function AllStoresPage() {
   const [supabase] = useState(() => createClient());
   const [rows, setRows] = useState<StoreRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showPilotManager, setShowPilotManager] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -33,6 +34,12 @@ export default function AllStoresPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: prof } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      setIsSuperAdmin(prof?.role === 'super_admin');
+    }
+
     // Fetch all stores to allow pilot management
     const { data: stores } = await supabase.from('stores').select('id, name, brand_id, is_active, brands(name)').order('name');
     const out = await Promise.all((stores || []).map(async st => {
@@ -48,19 +55,22 @@ export default function AllStoresPage() {
       ]);
       let br: StoreRow['br'];
       if (st.brand_id === BR_BRAND_ID) {
-        const [{ data: rep }, { data: weighed }] = await Promise.all([
+        const [{ data: todaySales }, { data: repToday }, { data: repYest }, { data: weighed }] = await Promise.all([
+          supabase.from('daily_sales_summary').select('net_sales, has_summary, has_items').eq('store_id', st.id).eq('entry_date', today).maybeSingle(),
+          supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: today }),
           supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: yesterday }),
           supabase.from('br_flavour_counts').select('session, grams').eq('store_id', st.id).eq('count_date', today),
         ]);
-        const r = (rep || []) as { status: string }[];
+        const hasTodaySales = Boolean(todaySales?.has_items);
+        const rep = (hasTodaySales && (repToday || []).length ? repToday : repYest || []) as { status: string }[];
         const todayGrams = (weighed || []).reduce((sum, w) => sum + Number((w as unknown as { grams: number }).grams || 0), 0);
         br = {
-          flavours: r.length,
+          flavours: rep.length,
           opened: (weighed || []).filter(w => w.session === 'opening').length,
           closed: (weighed || []).filter(w => w.session === 'closing').length,
-          itemsUploaded: Boolean(sales?.has_items),
-          over: r.filter(x => x.status === 'OVER').length,
-          checked: r.some(x => ['OVER', 'OK', 'CHECK'].includes(x.status)),
+          itemsUploaded: hasTodaySales || Boolean(sales?.has_items),
+          over: rep.filter(x => x.status === 'OVER').length,
+          checked: rep.some(x => ['OVER', 'OK', 'CHECK'].includes(x.status)),
           totalKg: todayGrams > 0 ? Math.round(todayGrams / 1000) : undefined,
         };
       }
@@ -119,12 +129,14 @@ export default function AllStoresPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            className={showPilotManager ? styles.primaryButton : styles.secondaryButton}
-            onClick={() => setShowPilotManager(v => !v)}
-          >
-            ⚙️ Pilot Stores ({activeStores.length} Active)
-          </button>
+          {isSuperAdmin && (
+            <button
+              className={showPilotManager ? styles.primaryButton : styles.secondaryButton}
+              onClick={() => setShowPilotManager(v => !v)}
+            >
+              ⚙️ Pilot Stores ({activeStores.length} Active)
+            </button>
+          )}
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
             <input
               type="checkbox"
@@ -214,19 +226,32 @@ export default function AllStoresPage() {
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{r.brand}</div>
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        onClick={() => toggleStoreActive(r.id, r.is_active)}
-                        disabled={togglingId === r.id}
-                        style={{
-                          padding: '0.25rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
-                          background: r.is_active ? 'rgba(0,200,83,0.15)' : 'var(--bg-secondary)',
-                          color: r.is_active ? 'var(--success)' : 'var(--text-secondary)',
-                          border: r.is_active ? '1px solid var(--success)' : '1px solid var(--border-color)',
-                        }}
-                      >
-                        {togglingId === r.id ? '…' : r.is_active ? '🟢 Active' : '⚪ Paused'}
-                      </button>
+                      {isSuperAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleStoreActive(r.id, r.is_active)}
+                          disabled={togglingId === r.id}
+                          style={{
+                            padding: '0.25rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
+                            background: r.is_active ? 'rgba(0,200,83,0.15)' : 'var(--bg-secondary)',
+                            color: r.is_active ? 'var(--success)' : 'var(--text-secondary)',
+                            border: r.is_active ? '1px solid var(--success)' : '1px solid var(--border-color)',
+                          }}
+                        >
+                          {togglingId === r.id ? '…' : r.is_active ? '🟢 Active' : '⚪ Paused'}
+                        </button>
+                      ) : (
+                        <span
+                          style={{
+                            padding: '0.25rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
+                            background: r.is_active ? 'rgba(0,200,83,0.15)' : 'var(--bg-secondary)',
+                            color: r.is_active ? 'var(--success)' : 'var(--text-secondary)',
+                            border: r.is_active ? '1px solid var(--success)' : '1px solid var(--border-color)',
+                          }}
+                        >
+                          {r.is_active ? '🟢 Active' : '⚪ Paused'}
+                        </span>
+                      )}
                     </td>
                     <td>{r.cash === 'Both' ? ok(true) : <span className={styles.badgeDefault}>{r.cash}</span>}</td>
                     {r.br ? (
