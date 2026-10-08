@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { istDate, addDays } from '@/lib/dates';
 import { BR_BRAND_ID, BRSalesLine } from '@/lib/br';
+import { EMPTY_BOX_GRAMS, FULL_BOX_GRAMS } from '@/lib/icecream';
 import styles from './flavours.module.css';
 
 type Size = {
@@ -33,7 +34,6 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
   const [pick, setPick] = useState<Record<string, { item: string; size: string }>>({});
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [sizesErr, setSizesErr] = useState<string | null>(null);
-  const [tare, setTare] = useState('');
 
   const notify = (text: string, ok = true) => { setMsg({ text, ok }); setTimeout(() => setMsg(null), 3500); };
 
@@ -111,18 +111,6 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
     setNewSize({ name: '', ic: '', gel: '' });
     notify(`${name} added`);
     loadSizes();
-  };
-
-  // ---------- empty bulk box weight (all flavours) ----------
-  const saveTare = async () => {
-    const g = Number(tare);
-    if (tare.trim() === '' || isNaN(g) || g < 0) { notify('Enter the empty box weight in grams', false); return; }
-    if (!confirm(`Set the empty bulk box weight to ${g} g for every flavour?`)) return;
-    const { error } = await supabase.from('items').update({ tare_grams: g }).in('id', flavours.map(f => f.id));
-    if (error) { notify('Could not save: ' + error.message, false); return; }
-    setTare('');
-    notify(`Empty box weight set to ${g} g`);
-    onChanged?.();
   };
 
   // ---------- matching ----------
@@ -206,17 +194,10 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
       </div>
 
       <div className={styles.card}>
-        <h2 className={styles.tierTitle}>Empty bulk box <span className={styles.count}>taken off the open box weight when staff weigh</span></h2>
+        <h2 className={styles.tierTitle}>Bulk box <span className={styles.count}>fixed for every flavour</span></h2>
         <p className={styles.subtitle} style={{ marginTop: 0 }}>
-          Now: {(() => { const t = Array.from(new Set(currentTares)); return t.length ? t.map(x => `${x} g`).join(' / ') : '—'; })()}.
-          Full box weight (grams of ice cream in one sealed box) is set per flavour on the Flavours tab.
+          1 packed box = {FULL_BOX_GRAMS} g of ice cream (ice cream and gelato). Empty box = {EMPTY_BOX_GRAMS} g — taken off the open box weight automatically.
         </p>
-        {canEdit && (
-          <div className={styles.formGrid}>
-            <label className={styles.field}>Empty box weight (g)<input type="number" min="0" value={tare} placeholder="100" onChange={e => setTare(e.target.value)} /></label>
-            <button className={styles.primary} onClick={saveTare}>Apply to all flavours</button>
-          </div>
-        )}
       </div>
 
       <div className={styles.card}>

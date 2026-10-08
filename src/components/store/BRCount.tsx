@@ -5,7 +5,7 @@ import Link from 'next/link';
 import styles from '@/app/(dashboard)/store/store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate, addDays } from '@/lib/dates';
-import { BoxEntry, boxEntryEmpty, boxNet } from '@/lib/icecream';
+import { BoxEntry, boxEntryEmpty, boxNet, EMPTY_BOX_GRAMS, FULL_BOX_GRAMS } from '@/lib/icecream';
 import { Session, grams } from '@/lib/br';
 import { StockTabs } from '@/components/store/StockTabs';
 
@@ -148,8 +148,9 @@ export function BRCount() {
       </div>
 
       <p className={styles.statusText} style={{ marginBottom: '1rem' }}>
-        For each flavour: count the <strong>unopened boxes</strong>, then put the <strong>open box</strong> on the scale and type its weight in grams.
-        The empty box (100 g) is taken off automatically. No open box? Leave the weight blank. Nothing at all? Enter 0 boxes.
+        For each flavour: <strong>Box 1</strong> = how many <strong>packed (sealed) boxes</strong>. <strong>Box 2</strong> = put the <strong>open box</strong> on the scale and type
+        exactly what it shows — <strong>with the box</strong>. The app takes off the {EMPTY_BOX_GRAMS} g box by itself (1 packed box = {FULL_BOX_GRAMS} g).
+        No open box? Leave Box 2 blank. Nothing at all? Enter 0.
       </p>
 
       <div className={styles.controls} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -174,16 +175,20 @@ export function BRCount() {
                   <div key={f.id} className={styles.itemRow}>
                     <div className={styles.itemInfo}>
                       <span className={styles.itemName}>{f.name}{saved[session].has(f.id) ? ' ✓' : ''}</span>
-                      {f.full_box_grams ? <span className={styles.badge}>{grams(f.full_box_grams)}/box</span>
-                        : <span className={styles.badge} style={{ color: 'var(--warning)' }}>box weight not set</span>}
                     </div>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <input type="number" inputMode="numeric" min="0" step="1" className={styles.input} style={{ maxWidth: 130 }}
-                        value={b.unopened} placeholder="Unopened boxes" aria-label={`${f.name} unopened boxes`}
-                        onChange={e => setEntry(f.id, 'unopened', e.target.value)} />
-                      <input type="number" inputMode="decimal" min="0" className={styles.input}
-                        value={b.openGross} placeholder="Open box on scale (g)" aria-label={`${f.name} open box weight`}
-                        onChange={e => setEntry(f.id, 'openGross', e.target.value)} />
+                      <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem', color: 'var(--text-secondary)', maxWidth: 130 }}>
+                        Packed boxes
+                        <input type="number" inputMode="numeric" min="0" step="1" className={styles.input}
+                          value={b.unopened} placeholder="0" aria-label={`${f.name} packed boxes`}
+                          onChange={e => setEntry(f.id, 'unopened', e.target.value)} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem', color: 'var(--text-secondary)', flex: 1 }}>
+                        Open box on scale (g, with box)
+                        <input type="number" inputMode="decimal" min="0" className={styles.input}
+                          value={b.openGross} placeholder="e.g. 1450" aria-label={`${f.name} open box weight with box`}
+                          onChange={e => setEntry(f.id, 'openGross', e.target.value)} />
+                      </label>
                     </div>
                     <div style={{ fontSize: '0.85rem', color: r?.error ? 'var(--danger)' : 'var(--text-secondary)' }}>
                       {r?.error || (r ? `= ${grams(r.grams)}` : '')}
