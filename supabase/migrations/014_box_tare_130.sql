@@ -1,5 +1,5 @@
 -- Bulk ice cream boxes are fixed for every flavour (ice cream and gelato):
--- 1 sealed box = 2250 g of ice cream, empty box = 130 g.
+-- 1 sealed box = 2250 g of ice cream, empty box tare = 130 g.
 UPDATE items
 SET full_box_grams = 2250, tare_grams = 130
 WHERE tare_grams > 0;

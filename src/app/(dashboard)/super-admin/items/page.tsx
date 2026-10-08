@@ -12,6 +12,8 @@ import { isMonthEndAudit, parseMonthEndAudit } from '@/lib/stock/audit-files';
 type Material = { sku: string; name: string; type: string | null; category: string | null; sub_category: string | null;
   unit: string | null; rate: number | null; is_critical: boolean; stock_group: string | null };
 import styles from '../super-admin.module.css';
+import { FlavoursContent } from '../flavours/page';
+import { BR_BRAND_ID } from '@/lib/br';
 
 type Brand = { id: string; name: string };
 type Category = { id: string; name: string; brand_id: string; is_flavour: boolean };
@@ -270,13 +272,45 @@ export default function ItemsPage() {
 
   if (loading) return <div className={styles.loading}>Loading items…</div>;
 
+  const isBRSelected = brandId === BR_BRAND_ID || /baskin/i.test(brands.find(b => b.id === brandId)?.name || '');
+
   return (
     <div className={styles.container}>
+      {/* Brand Switcher */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+        {brands.map(b => {
+          const isSelected = b.id === brandId;
+          const isBR = b.id === BR_BRAND_ID || /baskin/i.test(b.name);
+          return (
+            <button
+              key={b.id}
+              className={isSelected ? styles.primaryButton : styles.secondaryButton}
+              style={{
+                padding: '0.65rem 1.35rem',
+                fontSize: '1.05rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+              onClick={() => setBrandId(b.id)}
+            >
+              {isBR ? '🍨 Baskin Robbins Ice Cream' : '🥞 99 Pancakes Items'}
+            </button>
+          );
+        })}
+      </div>
+
+      {isBRSelected ? (
+        <FlavoursContent />
+      ) : (
+        <>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Items</h1>
-          <p className={styles.subtitle}>What each store counts, how often, and its Rista code and rate for the stock report.
-            {' '}<Link href="/super-admin/flavours">🍨 Ice cream flavours &amp; box weights →</Link></p>
+          <h1 className={styles.title}>99 Pancakes Items</h1>
+          <p className={styles.subtitle}>What each 99 Pancakes store counts, how often, and its Rista code and rate for the stock report.</p>
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -462,6 +496,8 @@ export default function ItemsPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 }

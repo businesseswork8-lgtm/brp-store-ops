@@ -2,17 +2,17 @@
  * Baskin Robbins ice cream is counted in GRAMS.
  *
  *   stock (g) = packed (sealed) boxes × 2250 g
- *             + (open box on the scale, WITH the box − 100 g empty box)
+ *             + (open box on the scale, WITH the box − 130 g empty box)
  *
  * Both weights are fixed for every flavour (ice cream and gelato):
  * - FULL_BOX_GRAMS  = ice cream inside one sealed bulk box
- * - EMPTY_BOX_GRAMS = the empty bulk box itself — taken off automatically,
+ * - EMPTY_BOX_GRAMS = the empty bulk box itself — taken off automatically (130 g),
  *                     so staff type exactly what the scale shows.
  * - Only ONE open box per flavour is weighed. If there is no open box, leave it blank.
  */
 
 export const FULL_BOX_GRAMS = 2250;
-export const EMPTY_BOX_GRAMS = 100;
+export const EMPTY_BOX_GRAMS = 130;
 
 export type BoxItem = { name: string; tare_grams?: number; full_box_grams?: number | null };
 

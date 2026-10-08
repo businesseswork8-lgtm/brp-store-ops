@@ -13,13 +13,14 @@ type StaffMember = { id: string; name: string };
 const NOTES = DENOMINATIONS.filter(d => d.value !== 2000);
 
 export default function CashTallyPage() {
-  const { supabase, store, loading: storeLoading } = useActiveStore();
+  const { supabase, store, profile, loading: storeLoading } = useActiveStore();
   const [mode, setMode] = useState<'morning' | 'evening'>('morning');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [selectedStaff, setSelectedStaff] = useState('');
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [hasSavedTally, setHasSavedTally] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const today = istDate();
@@ -34,12 +35,15 @@ export default function CashTallyPage() {
     ]);
     setStaffList(staff || []);
     if (tally) {
+      setHasSavedTally(true);
       setSelectedStaff(tally.staff_member_id || '');
       const c: Record<string, number> = {};
       NOTES.forEach(d => { c[d.key] = tally[d.key] || 0; });
       setCounts(c);
     } else {
+      setHasSavedTally(false);
       setCounts({});
+      setSelectedStaff('');
     }
     setLoading(false);
   }, [supabase, store, mode, today]);
@@ -53,8 +57,15 @@ export default function CashTallyPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const isSuperAdminOrAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
+  const isLockedForStore = hasSavedTally && !isSuperAdminOrAdmin;
+
   const handleSubmit = async () => {
     if (!store) return;
+    if (isLockedForStore) {
+      showToast('Cash count is locked. Only an Admin can edit it.', 'error');
+      return;
+    }
     if (!selectedStaff) { showToast('Please select who is counting', 'error'); return; }
     setSubmitting(true);
     try {
@@ -75,6 +86,7 @@ export default function CashTallyPage() {
         .from('daily_cash_tally')
         .upsert(payload, { onConflict: 'store_id,entry_date,tally_type' });
       if (error) throw error;
+      setHasSavedTally(true);
       showToast(`${mode === 'morning' ? 'Morning' : 'Evening'} cash saved: ₹${total.toLocaleString('en-IN')}`, 'success');
     } catch (err) {
       console.error(err);
@@ -104,8 +116,28 @@ export default function CashTallyPage() {
         </button>
       </div>
 
+      {isLockedForStore && (
+        <div style={{ maxWidth: '600px', margin: '0 auto 1.5rem', padding: '1rem', background: 'rgba(255,214,0,0.1)', border: '1px solid var(--warning)', borderRadius: '8px', textAlign: 'center' }}>
+          🔒 <strong>{mode === 'morning' ? 'Morning' : 'Evening'} cash has been submitted and locked.</strong>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+            Store staff cannot edit a saved cash count. If an adjustment is needed, contact an Admin or Super Admin.
+          </div>
+        </div>
+      )}
+
+      {hasSavedTally && isSuperAdminOrAdmin && (
+        <div style={{ maxWidth: '600px', margin: '0 auto 1.5rem', padding: '0.75rem 1rem', background: 'rgba(0,200,83,0.1)', border: '1px solid var(--success)', borderRadius: '8px', textAlign: 'center', fontSize: '0.88rem' }}>
+          👑 <strong>Admin Mode:</strong> You have permission to edit and update this saved cash count.
+        </div>
+      )}
+
       <div className={styles.controls} style={{ maxWidth: '600px', margin: '0 auto 2rem' }}>
-        <select className={styles.select} value={selectedStaff} onChange={e => setSelectedStaff(e.target.value)}>
+        <select
+          className={styles.select}
+          value={selectedStaff}
+          onChange={e => setSelectedStaff(e.target.value)}
+          disabled={isLockedForStore}
+        >
           <option value="">Who is counting?</option>
           {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
@@ -126,6 +158,7 @@ export default function CashTallyPage() {
               }}
               placeholder="0"
               min="0"
+              disabled={isLockedForStore}
             />
             <div className={styles.subtotal}>₹{((counts[d.key] || 0) * d.value).toLocaleString('en-IN')}</div>
           </div>
@@ -138,9 +171,15 @@ export default function CashTallyPage() {
       </div>
 
       <div className={styles.submitArea} style={{ maxWidth: '600px', margin: '0 auto' }}>
-        <button className={styles.button} onClick={handleSubmit} disabled={submitting}>
-          {submitting ? 'Saving...' : `Save ${mode === 'morning' ? 'Morning' : 'Evening'} Cash`}
-        </button>
+        {isLockedForStore ? (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+            Count locked (₹{total.toLocaleString('en-IN')})
+          </div>
+        ) : (
+          <button className={styles.button} onClick={handleSubmit} disabled={submitting}>
+            {submitting ? 'Saving...' : hasSavedTally && isSuperAdminOrAdmin ? `Update ${mode === 'morning' ? 'Morning' : 'Evening'} Cash` : `Save ${mode === 'morning' ? 'Morning' : 'Evening'} Cash`}
+          </button>
+        )}
       </div>
 
       {toast && <div className={`${styles.toast} ${styles[toast.type]}`}>{toast.message}</div>}

@@ -7,7 +7,7 @@ import { useActiveStore } from '@/lib/hooks/useActiveStore';
 import { istDate, addDays } from '@/lib/dates';
 import { Frequency, FREQUENCY_LABEL, isDue } from '@/lib/stock/schedule';
 import { displayUnit, fromDisplay, toDisplay } from '@/lib/stock/units';
-import { BoxEntry, boxEntryEmpty, boxNet } from '@/lib/icecream';
+import { BoxEntry, boxEntryEmpty, boxNet, EMPTY_BOX_GRAMS } from '@/lib/icecream';
 import { StockTabs } from '@/components/store/StockTabs';
 import { BRCount } from '@/components/store/BRCount';
 import { isBRStore } from '@/lib/br';
@@ -95,6 +95,43 @@ function GeneralCount() {
     (fullCount ? true : isDue(i.count_frequency, lastCount[i.id] || null, today)) &&
     (!search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase())));
 
+  const autoSaveSingle = async (item: Item, val?: string, boxVal?: BoxEntry) => {
+    if (!store || !staff) return;
+    const v = val !== undefined ? val : values[item.id] ?? '';
+    const b = boxVal !== undefined ? boxVal : boxes[item.id] || { unopened: '', openGross: '' };
+    const hasData = isBox(item) ? !boxEntryEmpty(b) : v.trim() !== '';
+    if (!hasData) return;
+
+    if (isBox(item)) {
+      const r = boxNet({ name: item.name, tare_grams: item.tare_grams, full_box_grams: item.full_box_grams }, b);
+      if (r.error || r.grams === null) return;
+    } else if (isNaN(Number(v)) || Number(v) < 0) {
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('stock_counts').upsert({
+        store_id: store.id, item_id: item.id, count_date: today,
+        ...(isBox(item)
+          ? {
+              quantity: boxNet({ name: item.name, tare_grams: item.tare_grams, full_box_grams: item.full_box_grams }, b).grams ?? 0,
+              unopened_boxes: Number(b.unopened) || 0,
+              open_box_gross: Number(b.openGross) || 0,
+            }
+          : { quantity: fromDisplay(Number(v), item.rista_unit, item.uom) }),
+        kind: fullCount ? 'audit' : 'count',
+        staff_member_id: staff, submitted_by_profile_id: user?.id,
+      }, { onConflict: 'store_id,item_id,count_date' });
+
+      if (!error) {
+        setSavedToday(prev => new Set([...prev, item.id]));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const save = async () => {
     if (!store) return;
     if (!staff) { showToast('Please select who is counting', 'error'); return; }
@@ -167,7 +204,7 @@ function GeneralCount() {
 
       {items.some(isBox) && shown.some(isBox) && (
         <p className={styles.statusText} style={{ marginBottom: '1rem' }}>
-          🍨 Ice cream: enter <strong>unopened boxes</strong>, and put the <strong>open box</strong> on the scale and enter its weight. The empty box (100 g) is taken off automatically.
+          🍨 Ice cream: enter <strong>unopened boxes</strong>, and put the <strong>open box</strong> on the scale and enter its weight. The empty box ({EMPTY_BOX_GRAMS} g) is taken off automatically.
         </p>
       )}
 
@@ -185,22 +222,30 @@ function GeneralCount() {
               {g.list.map(i => (
                 <div key={i.id} className={styles.itemRow}>
                   <div className={styles.itemInfo}>
-                    <span className={styles.itemName}>{i.name}{savedToday.has(i.id) ? ' ✓' : ''}</span>
+                    <span className={styles.itemName}>
+                      {i.name}
+                      {savedToday.has(i.id) ? <span style={{ color: 'var(--success)', fontSize: '0.8rem', marginLeft: '0.5rem' }}>✓ auto-saved</span> : ''}
+                    </span>
                     <span className={styles.badge}>{displayUnit(i.rista_unit, i.uom)}</span>
                   </div>
                   {isBox(i) ? (() => {
                     const b = boxes[i.id] || { unopened: '', openGross: '' };
                     const r = boxEntryEmpty(b) ? null : boxNet({ name: i.name, tare_grams: i.tare_grams, full_box_grams: i.full_box_grams }, b);
-                    const set = (k: keyof BoxEntry, v: string) => setBoxes(x => ({ ...x, [i.id]: { ...b, [k]: v } }));
+                    const set = (k: keyof BoxEntry, v: string) => {
+                      const updated = { ...b, [k]: v };
+                      setBoxes(x => ({ ...x, [i.id]: updated }));
+                    };
                     return (
                       <>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <input type="number" inputMode="numeric" min="0" step="1" className={styles.input} style={{ maxWidth: 130 }}
                             value={b.unopened} placeholder="Unopened boxes" aria-label={`${i.name} unopened boxes`}
-                            onChange={e => set('unopened', e.target.value)} />
+                            onChange={e => set('unopened', e.target.value)}
+                            onBlur={() => autoSaveSingle(i, undefined, b)} />
                           <input type="number" inputMode="decimal" min="0" className={styles.input}
                             value={b.openGross} placeholder="Open box on scale (g)" aria-label={`${i.name} open box weight`}
-                            onChange={e => set('openGross', e.target.value)} />
+                            onChange={e => set('openGross', e.target.value)}
+                            onBlur={() => autoSaveSingle(i, undefined, b)} />
                         </div>
                         {r && <div style={{ fontSize: '0.85rem', color: r.error ? 'var(--danger)' : 'var(--text-secondary)' }}>
                           {r.error || `= ${(Number(r.grams) / 1000).toFixed(2)} kg ice cream`}</div>}
@@ -210,7 +255,8 @@ function GeneralCount() {
                     <input type="number" inputMode="decimal" min="0" className={styles.input}
                       value={values[i.id] ?? ''} placeholder={`Count in ${displayUnit(i.rista_unit, i.uom)}`}
                       aria-label={`${i.name} count`}
-                      onChange={e => setValues(v => ({ ...v, [i.id]: e.target.value }))} />
+                      onChange={e => setValues(v => ({ ...v, [i.id]: e.target.value }))}
+                      onBlur={() => autoSaveSingle(i, values[i.id])} />
                   )}
                   {!lastCount[i.id] && <div style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>First count for this item</div>}
                 </div>

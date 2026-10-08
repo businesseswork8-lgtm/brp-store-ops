@@ -30,6 +30,10 @@ const SUB_CATEGORIES = ['Fruits', 'Classics & Nuts', 'Chocolates'];
 const BR_BRAND_ID = '22222222-2222-2222-2222-222222222222';
 import { EMPTY_BOX_GRAMS, FULL_BOX_GRAMS } from "@/lib/icecream";
 
+export function FlavoursContent() {
+  return <FlavoursPage />;
+}
+
 export default function FlavoursPage() {
   const [supabase] = useState(() => createClient());
   const [tiers, setTiers] = useState<Tier[]>([]);

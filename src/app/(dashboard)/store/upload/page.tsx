@@ -40,20 +40,22 @@ export default function UploadPage() {
   // ---- read files ----
   const readFiles = async (list: FileList | File[]) => {
     setMessage(null);
-    const parsed: Parsed[] = [];
-    let use: Usage | null = null;
-    let aud: MonthEnd | null = null;
-    for (const file of Array.from(list).slice(0, 3)) {
+    const newFiles: Parsed[] = [...files];
+    let use: Usage | null = usage;
+    let aud: MonthEnd | null = audit;
+    for (const file of Array.from(list).slice(0, 5)) {
       try {
         const buf = await file.arrayBuffer();
         const head = new TextDecoder().decode(buf.slice(0, 400));
         if (isMonthEndAudit(head)) {
           aud = { ...parseMonthEndAudit(buf), fileName: file.name };
         } else if (isUsageFile(file.name, head)) {
-          if (use) { setMessage({ type: 'error', text: 'Please choose only one Consumption Variance file.' }); return; }
           use = { ...parseConsumption(buf, file.name), fileName: file.name };
         } else {
-          parsed.push({ ...parseRistaPOSFile(buf, file.name), fileName: file.name });
+          const parsedItem = { ...parseRistaPOSFile(buf, file.name), fileName: file.name };
+          const idx = newFiles.findIndex(f => f.kind === parsedItem.kind);
+          if (idx >= 0) newFiles[idx] = parsedItem;
+          else newFiles.push(parsedItem);
         }
       } catch (e) {
         console.error(e);
@@ -61,11 +63,7 @@ export default function UploadPage() {
         return;
       }
     }
-    if (parsed.filter(p => p.kind === 'summary').length > 1 || parsed.filter(p => p.kind === 'items').length > 1) {
-      setMessage({ type: 'error', text: 'Please choose one file of each kind (Sales Summary, Sales By Items, Consumption Variance).' });
-      return;
-    }
-    setFiles(parsed);
+    setFiles(newFiles);
     setUsage(use);
     setAudit(aud);
   };
@@ -236,6 +234,46 @@ export default function UploadPage() {
         <p className={styles.subtitle} style={{ margin: 0 }}>
           You can pick both files at once. Month-end: the Rista audit file goes here too.
         </p>
+      </div>
+
+      {/* File status cards */}
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', margin: '1rem 0' }}>
+        <div style={{
+          flex: 1, minWidth: 220, padding: '0.85rem 1rem', borderRadius: '8px',
+          background: summary ? 'rgba(0,200,83,0.1)' : 'var(--bg-secondary)',
+          border: summary ? '1px solid var(--success)' : '1px solid var(--border-color)',
+        }}>
+          <div style={{ fontWeight: 600, fontSize: '0.9rem', color: summary ? 'var(--success)' : undefined }}>
+            {summary ? '✓ 1. Sales Summary File' : '1. Sales Summary File'}
+          </div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+            {summary ? `${summary.fileName} · Net: ₹${summary.summary.net_sales?.toLocaleString('en-IN')}` : 'Drop or choose Rista Sales Summary file'}
+          </div>
+        </div>
+
+        <div style={{
+          flex: 1, minWidth: 220, padding: '0.85rem 1rem', borderRadius: '8px',
+          background: items ? 'rgba(0,200,83,0.1)' : 'var(--bg-secondary)',
+          border: items ? '1px solid var(--success)' : '1px solid var(--border-color)',
+        }}>
+          <div style={{ fontWeight: 600, fontSize: '0.9rem', color: items ? 'var(--success)' : undefined }}>
+            {items ? '✓ 2. Sales By Items File' : '2. Sales By Items File'}
+          </div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+            {items ? `${items.fileName} · ${items.items?.length || 0} line(s) sold` : 'Drop or choose Rista Sales By Items file'}
+          </div>
+        </div>
+
+        {(files.length > 0 || usage || audit) && (
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            style={{ alignSelf: 'center', height: 'fit-content' }}
+            onClick={() => { setFiles([]); setUsage(null); setAudit(null); setMessage(null); }}
+          >
+            Clear files
+          </button>
+        )}
       </div>
 
       {message && (

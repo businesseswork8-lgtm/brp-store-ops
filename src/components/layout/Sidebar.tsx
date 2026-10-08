@@ -30,8 +30,7 @@ const overviewLinks: NavLink[] = [
   { href: '/super-admin/stock-report', label: 'Stock Report', icon: '📊' },
   { href: '/analytics/sales', label: 'Sales', icon: '💹', also: ['/analytics/trends'] },
 ];
-const itemsLink: NavLink = { href: '/super-admin/items', label: 'Items', icon: '🧾' };
-const iceCreamLink: NavLink = { href: '/super-admin/flavours', label: 'Ice Cream Setup', icon: '🍨' };
+const itemsLink: NavLink = { href: '/super-admin/items', label: 'Items & Products', icon: '🧾', also: ['/super-admin/flavours'] };
 const usersLink: NavLink = { href: '/super-admin/users', label: 'Staff & Logins', icon: '👤' };
 
 function groupsForRole(role: Profile['role'], canEdit: boolean) {
@@ -39,7 +38,7 @@ function groupsForRole(role: Profile['role'], canEdit: boolean) {
     return [
       { group: 'Overview', links: overviewLinks },
       { group: 'Store Work', links: storeLinks },
-      { group: 'Settings', links: [iceCreamLink, itemsLink, usersLink] },
+      { group: 'Settings', links: [itemsLink, usersLink] },
     ];
   }
   if (role === 'admin') {
@@ -47,7 +46,7 @@ function groupsForRole(role: Profile['role'], canEdit: boolean) {
       { group: 'Overview', links: overviewLinks },
       // View-only admins can read the Day Summary but not enter store data
       { group: 'Store Work', links: canEdit ? storeLinks : [daySummaryLink] },
-      { group: 'Settings', links: canEdit ? [iceCreamLink, itemsLink] : [iceCreamLink] },
+      { group: 'Settings', links: [itemsLink] },
     ];
   }
   return [{ group: 'Store Work', links: storeLinks }];

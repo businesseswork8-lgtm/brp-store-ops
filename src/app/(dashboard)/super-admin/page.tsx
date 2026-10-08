@@ -14,7 +14,7 @@ type StoreRow = {
   salesUploaded: boolean; usageUploaded: boolean;
   short: number; excess: number; problems: number;
   yesterdaySales: number | null;
-  br?: { flavours: number; opened: number; closed: number; itemsUploaded: boolean; over: number; checked: boolean };
+  br?: { flavours: number; opened: number; closed: number; itemsUploaded: boolean; over: number; checked: boolean; totalKg?: number };
 };
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
@@ -45,9 +45,10 @@ export default function AllStoresPage() {
         if (st.brand_id === BR_BRAND_ID) {
           const [{ data: rep }, { data: weighed }] = await Promise.all([
             supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: yesterday }),
-            supabase.from('br_flavour_counts').select('session').eq('store_id', st.id).eq('count_date', today),
+            supabase.from('br_flavour_counts').select('session, grams').eq('store_id', st.id).eq('count_date', today),
           ]);
           const r = (rep || []) as { status: string }[];
+          const todayGrams = (weighed || []).reduce((sum, w) => sum + Number((w as unknown as { grams: number }).grams || 0), 0);
           br = {
             flavours: r.length,
             opened: (weighed || []).filter(w => w.session === 'opening').length,
@@ -55,6 +56,7 @@ export default function AllStoresPage() {
             itemsUploaded: Boolean(sales?.has_items),
             over: r.filter(x => x.status === 'OVER').length,
             checked: r.some(x => ['OVER', 'OK', 'CHECK'].includes(x.status)),
+            totalKg: todayGrams > 0 ? Math.round(todayGrams / 1000) : undefined,
           };
         }
         const last: Record<string, string> = {};
@@ -116,8 +118,11 @@ export default function AllStoresPage() {
                 <td>{r.cash === 'Both' ? ok(true) : <span className={styles.badgeDefault}>{r.cash}</span>}</td>
                 {r.br ? (
                   <>
-                    <td>🍨 Open {r.br.opened >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.opened}/{r.br.flavours}</span>}
-                      {' '}Close {r.br.closed >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.closed}/{r.br.flavours}</span>}</td>
+                    <td>
+                      🍨 Open {r.br.opened >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.opened}/{r.br.flavours}</span>}
+                      {' '}Close {r.br.closed >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.closed}/{r.br.flavours}</span>}
+                      {r.br.totalKg ? <span style={{ fontSize: '0.82rem', color: 'var(--success)', fontWeight: 600, marginLeft: '0.4rem' }}>({r.br.totalKg} kg)</span> : ''}
+                    </td>
                     <td>Sales {ok(r.salesUploaded)} &nbsp; Items {ok(r.br.itemsUploaded)}</td>
                     <td>{!r.br.checked ? <span className={styles.badgeDefault}>Not checked</span>
                       : r.br.over ? <span className={styles.badgeDanger}>{r.br.over} flavour{r.br.over > 1 ? 's' : ''} over yesterday</span>
@@ -136,7 +141,12 @@ export default function AllStoresPage() {
                 </>
                 )}
                 <td><Link href="/super-admin/stock-report" className={styles.secondaryButton}
-                  onClick={() => { try { localStorage.setItem('selectedStore', r.id); } catch { /* ignore */ } }}>Stock report</Link></td>
+                  onClick={() => {
+                    try {
+                      localStorage.setItem('selectedStore', r.id);
+                      window.dispatchEvent(new Event('storeChange'));
+                    } catch { /* ignore */ }
+                  }}>Stock report</Link></td>
               </tr>
             ))}
           </tbody>
