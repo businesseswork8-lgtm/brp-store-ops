@@ -60,7 +60,7 @@ export default function SalesAnalyticsPage() {
   }, [selectedStore, selectedDate]);
 
   const fetchStores = async () => {
-    const { data } = await supabase.from('stores').select('id, name, code, brands(name)').order('name');
+    const { data } = await supabase.from('stores').select('id, name, code, brands(name)').eq('is_active', true).order('name');
     if (data) setStores(data as any);
   };
 

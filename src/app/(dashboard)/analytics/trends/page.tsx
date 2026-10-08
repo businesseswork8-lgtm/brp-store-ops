@@ -37,7 +37,7 @@ export default function HistoricalTrendsPage() {
   }, [selectedStoreId, daysRange]);
 
   async function fetchStores() {
-    const { data } = await supabase.from('stores').select('id, name, code').order('name');
+    const { data } = await supabase.from('stores').select('id, name, code').eq('is_active', true).order('name');
     if (data) setStores(data);
   }
 
