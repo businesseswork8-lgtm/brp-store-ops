@@ -1,117 +1,152 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { StockTabs } from '@/components/store/StockTabs';
-import { displayUnit, fromDisplay, toDisplay } from '@/lib/stock/units';
-
-const MOVES = [
-  { v: 'received', label: 'Received from warehouse' },
-  { v: 'transfer_in', label: 'Transfer IN (from another store)' },
-  { v: 'transfer_out', label: 'Transfer OUT (to another store)' },
-] as const;
-type Move = typeof MOVES[number]['v'];
+import { createClient } from '@/lib/supabase/client';
 import styles from '../store.module.css';
-import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate } from '@/lib/dates';
-import { isBRStore } from '@/lib/br';
+import { toDisplay, fromDisplay, displayUnit } from '@/lib/stock/units';
+import { businessDate } from '@/lib/dates';
 
-type Item = { id: string; name: string; uom: string; tare_grams: number; full_box_grams: number | null; rista_unit: string | null };
-type StaffMember = { id: string; name: string };
-type Delivery = {
-  id: string;
-  quantity: number;
-  boxes: number | null;
-  movement?: string;
-  created_at: string;
-  po_reference: string | null;
-  items: { name: string; uom: string; rista_unit: string | null } | null;
-  staff_members: { name: string } | null;
-};
+type Move = 'received' | 'transfer_in' | 'transfer_out';
+const MOVES: { v: Move; label: string }[] = [
+  { v: 'received', label: 'Received stock' },
+  { v: 'transfer_in', label: 'Transfer IN (from another store)' },
+  { v: 'transfer_out', label: 'Transfer OUT (to another store)' }
+];
+
+const StockTabs = () => (
+  <div className={styles.tabs} style={{ marginBottom: '1.5rem' }}>
+    <Link href="/store/count" className={styles.tab}>Counts</Link>
+    <Link href="/store/deliveries" className={`${styles.tab} ${styles.active}`}>Received</Link>
+    <Link href="/store/wastage" className={styles.tab}>Wastage</Link>
+  </div>
+);
+
+
+type Item = { id: string; name: string; uom: string; rista_unit: string | null; tare_grams: number; full_box_grams: number | null };
+type Delivery = { id: string; created_at: string; quantity: number; boxes: number | null; movement: string; supplier_name: string | null; po_reference: string | null; items: { name: string; uom: string; rista_unit: string | null } | null; staff_members: { name: string } | null };
 
 export default function DeliveriesPage() {
-  const { supabase, store, loading: storeLoading } = useActiveStore();
-  const [items, setItems] = useState<Item[]>([]);
-  const [staffList, setStaffList] = useState<StaffMember[]>([]);
-  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const supabase = createClient();
+  const [store, setStore] = useState<{id: string, name: string} | null>(null);
+  const [storeLoading, setStoreLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<{ staff: string; item_id: string; qty: string; note: string; move: Move }>({ staff: '', item_id: '', qty: '', note: '', move: 'received' });
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  const today = istDate();
+  const [staffList, setStaffList] = useState<{id: string, name: string}[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const today = businessDate();
+
+  // Top level form
+  const [move, setMove] = useState<Move>('received');
+  const [staff, setStaff] = useState('');
+  const [note, setNote] = useState('');
+  const [search, setSearch] = useState('');
+  
+  // Item values: { [item_id]: string }
+  const [values, setValues] = useState<Record<string, string>>({});
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), 4000);
   };
 
+  useEffect(() => {
+    const id = localStorage.getItem('brp_selected_store');
+    const name = localStorage.getItem('brp_selected_store_name');
+    if (id && name) setStore({ id, name });
+    setStoreLoading(false);
+  }, []);
+
   const loadDeliveries = useCallback(async (storeId: string) => {
-    const { data } = await supabase
-      .from('purchase_orders')
-      .select('id, quantity, boxes, movement, created_at, po_reference, items(name, uom, rista_unit), staff_members(name)')
+    const { data } = await supabase.from('purchase_orders')
+      .select('id, created_at, quantity, boxes, movement, supplier_name, po_reference, items(name, uom, rista_unit), staff_members(name)')
       .eq('store_id', storeId)
       .eq('entry_date', today)
       .order('created_at', { ascending: false });
-    setDeliveries((data || []) as unknown as Delivery[]);
+    setDeliveries((data as any) || []);
   }, [supabase, today]);
 
   const load = useCallback(async () => {
     if (!store) return;
     setLoading(true);
-    const [{ data: staff }, { data: itemRows }] = await Promise.all([
-      supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
-      supabase.from('items')
-        .select('id, name, uom, tare_grams, full_box_grams, rista_unit, item_categories!inner(brand_id, is_flavour)')
-        .eq('is_active', true)
-        .eq('item_categories.brand_id', store.brand_id)
-        .order('name'),
-    ]);
-    // Baskin Robbins: only ice cream flavours are tracked
-    const br = isBRStore(store);
-    const rows = (itemRows || []).filter(i => !br || (i as unknown as { item_categories: { is_flavour: boolean } }).item_categories?.is_flavour);
-    setStaffList(staff || []);
-    setItems(rows.map(i => ({ id: i.id, name: i.name, uom: i.uom, tare_grams: Number(i.tare_grams) || 0, full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams), rista_unit: i.rista_unit })));
+    const { data: staffData } = await supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name');
+    setStaffList(staffData || []);
+    
+    // For BR, we typically receive Flavours. For 99P, other items. Load all active items.
+    // To make it easy to mass-add, we list them alphabetically.
+    const { data: rows } = await supabase
+      .from('items')
+      .select('id, name, uom, rista_unit, tare_grams, full_box_grams')
+      .eq('is_active', true)
+      .order('name');
+      
+    setItems((rows || []).map(i => ({ 
+      id: i.id, name: i.name, uom: i.uom, 
+      tare_grams: Number(i.tare_grams) || 0, 
+      full_box_grams: i.full_box_grams === null ? null : Number(i.full_box_grams), 
+      rista_unit: i.rista_unit 
+    })));
+    
     await loadDeliveries(store.id);
     setLoading(false);
   }, [supabase, store, loadDeliveries]);
 
   useEffect(() => { load(); }, [load]);
 
-  const item = items.find(i => i.id === form.item_id);
-  // Ice cream arrives in sealed boxes: staff enter the number of boxes, we convert to grams
-  const box = Boolean(item && item.tare_grams > 0);
-  const boxGrams = Number(item?.full_box_grams) || 0;
-  const qtyNum = form.qty === '' ? null : Number(form.qty);
-  const net = qtyNum === null ? null : box ? qtyNum * boxGrams : item ? fromDisplay(qtyNum, item.rista_unit, item.uom) : qtyNum;
+  const shown = items.filter(i => !search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase()));
 
-  const save = async () => {
+  const saveAll = async () => {
     if (!store) return;
-    if (!form.staff) { showToast('Please select who received it', 'error'); return; }
-    if (!item) { showToast('Please select the item', 'error'); return; }
-    if (box && !boxGrams) { showToast(`Full box weight for ${item.name} is not set — ask your manager (Ice Cream Flavours page)`, 'error'); return; }
-    if (box && !Number.isInteger(qtyNum)) { showToast('Enter a whole number of boxes', 'error'); return; }
-    if (net === null || !(net > 0)) { showToast('Please enter the quantity received', 'error'); return; }
-
-    setSaving(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Session expired. Please log in again.');
-      const { error } = await supabase.from('purchase_orders').insert({
+    if (!staff) { showToast('Please select who received it', 'error'); return; }
+    
+    const entriesToSave: any[] = [];
+    
+    for (const item of items) {
+      const val = (values[item.id] || '').trim();
+      if (!val) continue;
+      
+      const box = item.tare_grams > 0;
+      const boxGrams = item.full_box_grams || 0;
+      const qtyNum = Number(val);
+      
+      if (box && !boxGrams) { showToast(`Full box weight for ${item.name} is not set — ask your manager`, 'error'); return; }
+      if (box && !Number.isInteger(qtyNum)) { showToast(`Enter a whole number of boxes for ${item.name}`, 'error'); return; }
+      if (isNaN(qtyNum) || qtyNum <= 0) { showToast(`Check the number for ${item.name}`, 'error'); return; }
+      
+      const net = box ? qtyNum * boxGrams : fromDisplay(qtyNum, item.rista_unit, item.uom);
+      
+      entriesToSave.push({
         store_id: store.id,
         item_id: item.id,
         entry_date: today,
         quantity: net,
         boxes: box ? qtyNum : null,
-        movement: form.move,
+        movement: move,
         supplier_name: 'Warehouse',
-        po_reference: form.note.trim() || null,
-        staff_member_id: form.staff,
-        submitted_by_profile_id: user.id,
+        po_reference: note.trim() || null,
+        staff_member_id: staff,
       });
+    }
+    
+    if (entriesToSave.length === 0) { showToast('Enter at least one quantity', 'error'); return; }
+
+    setSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Session expired. Please log in again.');
+      
+      const inserts = entriesToSave.map(e => ({ ...e, submitted_by_profile_id: user.id }));
+      const { error } = await supabase.from('purchase_orders').insert(inserts);
+      
       if (error) throw error;
-      showToast(`${item.name}: ${net} ${item.uom} received`, 'success');
-      setForm(f => ({ ...f, item_id: '', qty: '', note: '', move: 'received' }));
+      
+      showToast(`Saved ${inserts.length} items successfully`, 'success');
+      setValues({});
+      setNote('');
+      setSearch('');
       loadDeliveries(store.id);
     } catch (err) {
       console.error(err);
@@ -145,52 +180,56 @@ export default function DeliveriesPage() {
       </p>
 
       <div className={styles.message} style={{ textAlign: 'left', marginBottom: '2rem' }}>
-        <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-          <div>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 200px' }}>
             <label className={styles.statusText}>What happened? *</label>
-            <select className={styles.select} value={form.move} onChange={e => setForm({ ...form, move: e.target.value as Move })}>
+            <select className={styles.select} value={move} onChange={e => setMove(e.target.value as Move)}>
               {MOVES.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
             </select>
           </div>
-          <div>
+          <div style={{ flex: '1 1 200px' }}>
             <label className={styles.statusText}>Entered by *</label>
-            <select className={styles.select} value={form.staff} onChange={e => setForm({ ...form, staff: e.target.value })}>
+            <select className={styles.select} value={staff} onChange={e => setStaff(e.target.value)}>
               <option value="">Who received it?</option>
               {staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
-          <div>
-            <label className={styles.statusText}>Item *</label>
-            <select className={styles.select} value={form.item_id} onChange={e => setForm({ ...form, item_id: e.target.value, qty: '' })}>
-              <option value="">Select item…</option>
-              {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={styles.statusText}>
-              {box ? 'Sealed boxes *' : `Quantity${item ? ` (${displayUnit(item.rista_unit, item.uom)})` : ''} *`}
-            </label>
-            <input type="number" inputMode="decimal" min="0" className={styles.input}
-              value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} placeholder="0" />
-          </div>
-          <div>
+          <div style={{ flex: '1 1 200px' }}>
             <label className={styles.statusText}>Challan / note (optional)</label>
-            <input type="text" className={styles.input} value={form.note}
-              onChange={e => setForm({ ...form, note: e.target.value })} placeholder="e.g. Challan 1234" />
+            <input type="text" className={styles.input} value={note}
+              onChange={e => setNote(e.target.value)} placeholder="e.g. Challan 1234" />
           </div>
         </div>
-        {box && (
-          <p className={styles.statusText} style={{ marginTop: '0.75rem' }}>
-            {boxGrams
-              ? <>One sealed box = {boxGrams} g{net !== null && net > 0 ? <> · Ice cream received: <strong>{net} g</strong></> : null}</>
-              : <span style={{ color: 'var(--danger)' }}>Full box weight is not set for this flavour — ask your manager.</span>}
-          </p>
-        )}
-        <div className={styles.submitArea} style={{ marginTop: '1rem' }}>
-          <button className={styles.button} onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Add'}
-          </button>
+      </div>
+      
+      <div className={styles.controls} style={{ marginBottom: '1rem' }}>
+        <input className={styles.input} style={{ width: '100%' }} placeholder="Search item to quickly add..." value={search} onChange={e => setSearch(e.target.value)} />
+      </div>
+
+      <div className={styles.formContainer}>
+        <div className={styles.itemGrid}>
+          {shown.map(i => {
+            const box = i.tare_grams > 0;
+            return (
+              <div key={i.id} className={styles.itemRow}>
+                <div className={styles.itemInfo}>
+                  <span className={styles.itemName}>{i.name}</span>
+                  <span className={styles.badge}>{box ? 'Sealed boxes' : displayUnit(i.rista_unit, i.uom)}</span>
+                </div>
+                <input type="number" inputMode="decimal" min="0" className={styles.input} style={{ maxWidth: 140 }}
+                  value={values[i.id] ?? ''} placeholder={box ? "Boxes" : "Qty"}
+                  aria-label={`${i.name} received quantity`}
+                  onChange={e => setValues(v => ({ ...v, [i.id]: e.target.value }))} />
+              </div>
+            );
+          })}
         </div>
+      </div>
+
+      <div className={styles.submitArea} style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
+        <button className={styles.button} onClick={saveAll} disabled={saving || Object.values(values).filter(v => v.trim()).length === 0}>
+          {saving ? 'Saving…' : `Save ${Object.values(values).filter(v => v.trim()).length} Items`}
+        </button>
       </div>
 
       <div className={styles.tableContainer}>
