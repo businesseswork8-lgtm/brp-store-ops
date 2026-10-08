@@ -244,15 +244,20 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
                 <span className={styles.meta}>{f.sub_category || '—'}</span>
                 <span className={styles.meta}>{f.code || ''}</span>
                 {canEdit ? (
-                  <span className={styles.meta}>
-                    <input className={styles.search} style={{ width: 80, minWidth: 0, flex: 'none' }} type="number" min="0" placeholder="0"
-                      aria-label={`${f.name} tasting allowance grams`} title="Tasting allowance: grams a day this flavour may be short (tastings) before it shows as Over"
-                      value={allowEdits[f.id] ?? String(f.tasting_allowance_grams ?? 0)}
+                  <span className={styles.meta} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <input className={styles.search} style={{ width: 85, minWidth: 0, flex: 'none' }} type="number" min="0" placeholder="5% default"
+                      aria-label={`${f.name} tasting allowance grams`} title="Tasting allowance: set 0 to use default 5% of daily sales, or enter a custom fixed gram limit"
+                      value={allowEdits[f.id] ?? (Number(f.tasting_allowance_grams) > 0 ? String(f.tasting_allowance_grams) : '')}
                       onChange={e => setAllowEdits(a => ({ ...a, [f.id]: e.target.value }))}
-                      onBlur={() => { if (allowEdits[f.id] !== undefined) saveAllowance(f); }} /> g tasting/day
+                      onBlur={() => { if (allowEdits[f.id] !== undefined) saveAllowance(f); }} />
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {Number(allowEdits[f.id] ?? f.tasting_allowance_grams) > 0 ? 'g fixed' : '(5% of sales)'}
+                    </span>
                   </span>
                 ) : (
-                  <span className={styles.meta}>{Number(f.tasting_allowance_grams) || 0} g tasting/day</span>
+                  <span className={styles.meta}>
+                    {Number(f.tasting_allowance_grams) > 0 ? `${f.tasting_allowance_grams} g tasting/day` : '5% of sales (default)'}
+                  </span>
                 )}
                 {canEdit ? (
                   <input className={styles.search} style={{ width: 200, minWidth: 0, flex: 'none' }} placeholder="Rista names (if different)"
