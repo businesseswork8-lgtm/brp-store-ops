@@ -13,6 +13,7 @@
 
 export const FULL_BOX_GRAMS = 2250;
 export const EMPTY_BOX_GRAMS = 130;
+export const MAX_OPEN_BOX_GROSS_GRAMS = 2500;
 
 export type BoxItem = { name: string; tare_grams?: number; full_box_grams?: number | null };
 
@@ -37,9 +38,9 @@ export function boxNet(item: BoxItem, e: BoxEntry): { grams: number | null; erro
   if (gross > 0 && gross < EMPTY_BOX_GRAMS) {
     return { grams: null, error: `${item.name}: open box weighs less than an empty box (${EMPTY_BOX_GRAMS} g)` };
   }
-  // Allow factory overspill capped at 2450g gross (2250g nominal + 130g tare + 70g max overspill)
-  if (gross > 2450) {
-    return { grams: null, error: `${item.name}: open box weight (${gross} g) exceeds maximum allowed (max 2450 g)` };
+  // Allow factory overspill capped at 2500g gross (2250g nominal + 130g tare + 120g max overspill)
+  if (gross > MAX_OPEN_BOX_GROSS_GRAMS) {
+    return { grams: null, error: `${item.name}: open box weight (${gross} g) exceeds maximum allowed (max ${MAX_OPEN_BOX_GROSS_GRAMS} g)` };
   }
   const openNet = gross > 0 ? gross - EMPTY_BOX_GRAMS : 0;
   return { grams: unopened * FULL_BOX_GRAMS + openNet, error: null };
