@@ -87,6 +87,28 @@ export function branchFromFileName(fileName: string): string | null {
   return m ? m[1].trim() : null
 }
 
+/** Try to extract date from filename (e.g. "... - 2026-10-08 23_55_12.csv" or "... - 2026-10-09 02_52_07.csv") */
+export function dateFromFileName(fileName: string): string | null {
+  const m = fileName.match(/(\d{4}-\d{2}-\d{2})/)
+  if (!m) return null
+  const ymd = m[1]
+  // If download time in filename is late night / early morning (00:00 to 05:59), shift closing is for the previous calendar day
+  const timeMatch = fileName.match(/(\d{4}-\d{2}-\d{2})[\s_]+(\d{2})[_\-:](\d{2})/)
+  if (timeMatch) {
+    const hour = parseInt(timeMatch[2], 10)
+    if (hour < 6) {
+      try {
+        const [y, mon, d] = ymd.split('-').map(Number)
+        const prev = new Date(Date.UTC(y, mon - 1, d - 1))
+        return prev.toISOString().slice(0, 10)
+      } catch {
+        return ymd
+      }
+    }
+  }
+  return ymd
+}
+
 /** Map a payment method name from the Payment Summary to our columns. */
 function paymentColumn(name: string): keyof SalesSummary {
   const n = name.toLowerCase()
@@ -127,6 +149,8 @@ export function parseRistaPOSFile(fileContent: string | ArrayBuffer, fileName = 
   // ---------- Sales By Items ----------
   if (header.includes('SKU') && header.includes('Item Name') && header.includes('Quantity')) {
     result.kind = 'items'
+    result.date = dateFromFileName(fileName)
+    if (result.date) result.dates = [result.date]
     const col = (name: string) => header.indexOf(name)
     const c = {
       sku: col('SKU'), type: col('Type'), name: col('Item Name'), invoice: col('Invoice Type'),

@@ -62,8 +62,10 @@ export default function UploadPage() {
   // Effective sales date:
   // 1. If Sales Summary is present, the date is extracted directly from the Sales Summary file.
   // 2. If admin is uploading without summary, use admin's selected itemsDate.
-  // 3. For store staff uploading without summary, default directly to current business date istDate().
-  const effectiveDate = summary?.date || (isAdmin ? itemsDate : istDate());
+  // 3. For store staff uploading: if file date is detected from filename use it; if late night (00:00-05:59) default to yesterday; otherwise today.
+  const isLateNight = new Date().getHours() < 6;
+  const staffDefaultDate = isLateNight ? yesterdayCal : todayCal;
+  const effectiveDate = summary?.date || (isAdmin ? itemsDate : (items?.date || staffDefaultDate));
 
   // ---- read files ----
   const readFiles = async (list: FileList | File[]) => {
@@ -82,6 +84,9 @@ export default function UploadPage() {
           use = { ...parseConsumption(buf, file.name), fileName: file.name };
         } else {
           const parsedItem = { ...parseRistaPOSFile(buf, file.name), fileName: file.name };
+          if (parsedItem.date) {
+            setItemsDate(parsedItem.date);
+          }
           const idx = newFiles.findIndex(f => f.kind === parsedItem.kind);
           if (idx >= 0) newFiles[idx] = parsedItem;
           else newFiles.push(parsedItem);
