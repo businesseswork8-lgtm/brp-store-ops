@@ -40,7 +40,7 @@ UPDATE items SET rista_names = 'Vanilla'                    WHERE name = 'Classi
 UPDATE items SET rista_names = 'Lotus Biscoff'              WHERE name = 'Biscoff'                 AND category_id IN (SELECT id FROM item_categories WHERE is_flavour);
 UPDATE items SET rista_names = 'Cookie Dough Choco Chip'    WHERE name = 'Choco Chip Cookie Dough' AND category_id IN (SELECT id FROM item_categories WHERE is_flavour);
 UPDATE items SET rista_names = 'Mint Chocolate Chip'        WHERE name = 'Mint Milk Chocolate Chip' AND category_id IN (SELECT id FROM item_categories WHERE is_flavour);
-UPDATE items SET rista_names = NULL
+UPDATE items SET rista_names = ''
   WHERE name IN ('Banana ''N'' Strawberry', 'Cookies ''N Cream', 'Mango & Cream', 'Pralines N Cream', 'Chocolate & Roasted Hazelnut')
     AND category_id IN (SELECT id FROM item_categories WHERE is_flavour);
 
