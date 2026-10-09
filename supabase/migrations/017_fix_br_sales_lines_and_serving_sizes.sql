@@ -90,7 +90,7 @@ RETURNS TABLE (
 ) AS $$
 DECLARE v_brand UUID;
 BEGIN
-  IF current_user <> 'postgres' AND NOT (public.is_super_admin() OR public.is_admin() OR public.has_store_access(p_store_id)) THEN
+  IF auth.uid() IS NOT NULL AND NOT (public.is_super_admin() OR public.is_admin() OR public.has_store_access(p_store_id)) THEN
     RAISE EXCEPTION 'Not allowed to view this store';
   END IF;
   SELECT s.brand_id INTO v_brand FROM stores s WHERE s.id = p_store_id;
@@ -218,7 +218,7 @@ CREATE OR REPLACE FUNCTION public.save_sales_items(p_store_id UUID, p_date DATE,
 RETURNS UUID AS $$
 DECLARE v_id UUID;
 BEGIN
-  IF current_user <> 'postgres' AND NOT (public.is_super_admin() OR public.is_admin() OR public.has_store_access(p_store_id)) THEN
+  IF auth.uid() IS NOT NULL AND NOT (public.is_super_admin() OR public.is_admin() OR public.has_store_access(p_store_id)) THEN
     RAISE EXCEPTION 'Not allowed to save sales for this store';
   END IF;
   SELECT id INTO v_id FROM daily_sales_summary WHERE store_id = p_store_id AND entry_date = p_date;
@@ -251,7 +251,7 @@ RETURNS TABLE (
 ) AS $$
 DECLARE v_brand UUID; v_has_sales BOOLEAN;
 BEGIN
-  IF current_user <> 'postgres' AND NOT (public.is_super_admin() OR public.is_admin() OR public.has_store_access(p_store_id)) THEN
+  IF auth.uid() IS NOT NULL AND NOT (public.is_super_admin() OR public.is_admin() OR public.has_store_access(p_store_id)) THEN
     RAISE EXCEPTION 'Not allowed to view this store';
   END IF;
   SELECT s.brand_id INTO v_brand FROM stores s WHERE s.id = p_store_id;
@@ -319,3 +319,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
 
+-- ---------------------------------------------------------------------
+-- 7. Align late-night closing counts (weighed past midnight at 2:30 AM) to business shift (8 Oct)
+-- ---------------------------------------------------------------------
+DELETE FROM br_flavour_counts 
+WHERE count_date = '2026-10-08' 
+  AND session = 'closing'
+  AND item_id IN (
+    SELECT item_id FROM br_flavour_counts 
+    WHERE count_date = '2026-10-09' AND session = 'closing' AND created_at < '2026-10-09 06:00:00+00'
+  );
+
+UPDATE br_flavour_counts
+SET count_date = '2026-10-08'
+WHERE count_date = '2026-10-09'
+  AND session = 'closing'
+  AND created_at < '2026-10-09 06:00:00+00';

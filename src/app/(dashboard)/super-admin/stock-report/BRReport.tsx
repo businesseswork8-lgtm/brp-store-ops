@@ -272,25 +272,40 @@ export function BRReport() {
                 Per flavour: <strong>used</strong> = opening + received − closing. <strong>Gap</strong> = used − sold − wasted.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <button className={styles.secondaryButton} onClick={() => setDate(d => addDays(d, -1))}>‹</button>
               <input type="date" className={styles.searchInput} value={date} max={istDate()} onChange={e => e.target.value && setDate(e.target.value)} />
               <button className={styles.secondaryButton} onClick={() => setDate(d => addDays(d, 1))} disabled={date >= istDate()}>›</button>
+              {date === istDate() && (
+                <button
+                  className={styles.secondaryButton}
+                  style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                  onClick={() => setDate(addDays(istDate(), -1))}
+                >
+                  ‹ Yesterday ({fmtDate(addDays(istDate(), -1))})
+                </button>
+              )}
             </div>
           </div>
 
           <div className={styles.statGrid} style={{ marginBottom: '1.25rem' }}>
             <div className={styles.statCard}>
               <div className={styles.statLabel}>Overall Ice Cream Shortage</div>
-              <div className={styles.statValue} style={{ color: totalShortageGrams > 0 ? 'var(--danger)' : 'var(--success)' }}>
-                {totalShortageGrams > 0
-                  ? totalShortageGrams >= 1000
-                    ? `${(totalShortageGrams / 1000).toFixed(2)} kg`
-                    : `${Math.round(totalShortageGrams)} g`
-                  : '0 g (None)'}
+              <div className={styles.statValue} style={{ color: noSales ? 'var(--text-secondary)' : totalShortageGrams > 0 ? 'var(--danger)' : 'var(--success)' }}>
+                {noSales
+                  ? 'Pending Sales'
+                  : totalShortageGrams > 0
+                    ? totalShortageGrams >= 1000
+                      ? `${(totalShortageGrams / 1000).toFixed(2)} kg`
+                      : `${Math.round(totalShortageGrams)} g`
+                    : '0 g (None)'}
               </div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                {over.length > 0 ? `${over.length} flavour${over.length > 1 ? 's' : ''} with excess loss` : 'All flavours within allowance'}
+                {noSales
+                  ? 'Awaiting Sales By Items upload'
+                  : over.length > 0
+                    ? `${over.length} flavour${over.length > 1 ? 's' : ''} with excess loss`
+                    : 'All flavours within allowance'}
               </div>
             </div>
 
@@ -322,7 +337,7 @@ export function BRReport() {
           </div>
 
           {/* Detailed Shortage Bifurcation by Flavour */}
-          {over.length > 0 && (
+          {!noSales && over.length > 0 && (
             <div className={styles.card} style={{ marginBottom: '1.5rem', border: '1px solid rgba(255,23,68,0.3)', background: 'rgba(255,23,68,0.03)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div>

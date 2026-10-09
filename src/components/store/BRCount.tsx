@@ -38,7 +38,13 @@ export function BRCount() {
   staffRef.current = staff;
   const hasInitializedSession = useRef(false);
 
-  const today = istDate();
+  // If weighing late at night / early morning (00:00 - 05:59 IST), the shift belongs to yesterday
+  const istHour = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hourCycle: 'h23' }).format(new Date()),
+    10
+  );
+  const isLateNight = istHour < 6;
+  const today = isLateNight ? addDays(istDate(), -1) : istDate();
 
   const [lastSavedTimes, setLastSavedTimes] = useState<Record<Session, string | null>>({ opening: null, closing: null });
 
@@ -312,7 +318,14 @@ export function BRCount() {
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className={styles.title}>Ice Cream Weigh</h1>
-          <p className={styles.subtitle}>Weigh <strong>every flavour</strong> at opening and again at closing.</p>
+          <p className={styles.subtitle}>
+            Weigh <strong>every flavour</strong> at opening and again at closing.
+            {isLateNight && (
+              <span style={{ display: 'block', color: 'var(--warning)', marginTop: '0.25rem', fontWeight: 500 }}>
+                🌙 Night shift mode: Recording closing counts for {today} shift
+              </span>
+            )}
+          </p>
         </div>
         <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>
