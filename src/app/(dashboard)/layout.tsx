@@ -13,7 +13,7 @@ export default function DashboardLayout({
       <div 
         style={{ 
           flex: 1, 
-          marginLeft: '260px', 
+          marginLeft: 'var(--sidebar-width, 260px)', 
           display: 'flex', 
           flexDirection: 'column',
           transition: 'margin-left 0.3s ease',

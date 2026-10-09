@@ -61,6 +61,7 @@ const roleLabel: Record<Profile['role'], string> = {
 export function Sidebar() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [open, setOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const [supabase] = useState(() => createClient());
@@ -78,6 +79,26 @@ export function Sidebar() {
     };
     fetchProfile();
   }, [supabase]);
+
+  // Load collapse state from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('sidebar_collapsed') === 'true';
+    if (stored) {
+      setIsCollapsed(true);
+      document.documentElement.style.setProperty('--sidebar-width', '72px');
+    } else {
+      document.documentElement.style.setProperty('--sidebar-width', '260px');
+    }
+  }, []);
+
+  const toggleCollapse = () => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar_collapsed', String(next));
+      document.documentElement.style.setProperty('--sidebar-width', next ? '72px' : '260px');
+      return next;
+    });
+  };
 
   // Mobile: header hamburger toggles the sidebar
   useEffect(() => {
@@ -97,30 +118,52 @@ export function Sidebar() {
 
   // Show nothing role-specific until we know the role
   const menuGroups = profile ? groupsForRole(profile.role, Boolean(profile.can_edit)) : [];
+  const canCollapse = profile?.role === 'super_admin' || profile?.role === 'admin';
 
   return (
     <>
       {open && <div className={styles.backdrop} onClick={() => setOpen(false)} />}
-      <aside className={`${styles.sidebar} ${open ? styles.sidebarOpen : ''}`}>
+      <aside className={`${styles.sidebar} ${open ? styles.sidebarOpen : ''} ${isCollapsed ? styles.collapsed : ''}`}>
         <div className={styles.logoArea}>
-          <h1 className={styles.logoTitle}>BRP</h1>
-          <p className={styles.logoSubtitle}>Store Operations</p>
+          {!isCollapsed ? (
+            <div>
+              <h1 className={styles.logoTitle}>BRP</h1>
+              <p className={styles.logoSubtitle}>Store Operations</p>
+            </div>
+          ) : (
+            <h1 className={styles.logoTitleMini}>BRP</h1>
+          )}
+
+          {canCollapse && (
+            <button
+              onClick={toggleCollapse}
+              className={styles.collapseToggle}
+              title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+              aria-label={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+            >
+              {isCollapsed ? '❯' : '❮'}
+            </button>
+          )}
         </div>
 
         <nav className={styles.nav}>
           {menuGroups.map((group, i) => (
             <div key={group.group} className={styles.navGroup}>
-              <div className={styles.navGroupTitle}>{group.group}</div>
-              {group.links.map(link => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={`${styles.navLink} ${pathname === link.href || link.also?.includes(pathname) ? styles.navLinkActive : ''}`}
-                >
-                  <span className={styles.icon}>{link.icon}</span>
-                  {link.label}
-                </Link>
-              ))}
+              {!isCollapsed && <div className={styles.navGroupTitle}>{group.group}</div>}
+              {group.links.map(link => {
+                const isActive = pathname === link.href || link.also?.includes(pathname);
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`${styles.navLink} ${isActive ? styles.navLinkActive : ''}`}
+                    title={isCollapsed ? link.label : undefined}
+                  >
+                    <span className={styles.icon}>{link.icon}</span>
+                    {!isCollapsed && <span>{link.label}</span>}
+                  </Link>
+                );
+              })}
               {i < menuGroups.length - 1 && <div className={styles.divider} />}
             </div>
           ))}
@@ -129,12 +172,25 @@ export function Sidebar() {
         <div className={styles.footer}>
           {profile && (
             <div className={styles.userInfo}>
-              <span className={styles.userName}>{profile.full_name || 'User'}</span>
-              <span className={styles.userRole}>{roleLabel[profile.role]}</span>
+              {!isCollapsed ? (
+                <>
+                  <span className={styles.userName}>{profile.full_name || 'User'}</span>
+                  <span className={styles.userRole}>{roleLabel[profile.role]}</span>
+                </>
+              ) : (
+                <div className={styles.userAvatarMini} title={`${profile.full_name || 'User'} (${roleLabel[profile.role]})`}>
+                  {(profile.full_name || 'U').charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
           )}
-          <button onClick={handleLogout} className={styles.logoutBtn}>
-            <span className={styles.icon}>🚪</span> Logout
+          <button
+            onClick={handleLogout}
+            className={styles.logoutBtn}
+            title={isCollapsed ? 'Logout' : undefined}
+          >
+            <span className={styles.icon}>🚪</span>
+            {!isCollapsed && <span>Logout</span>}
           </button>
         </div>
       </aside>

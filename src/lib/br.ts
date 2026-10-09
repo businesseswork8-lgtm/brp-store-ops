@@ -23,12 +23,12 @@ export type BRSalesLine = {
   grams_each: number | null; grams: number; matched_by: 'saved' | 'auto' | 'ignored' | 'skipped' | 'no_flavour' | 'none';
 };
 
-export const BR_STATUS: Record<BRReportRow['status'], { label: string; cls: 'badgeDanger' | 'badgeSuccess' | 'badgeDefault'; help: string }> = {
-  OVER: { label: 'Over', cls: 'badgeDanger', help: 'More ice cream gone than sales + wastage + tasting allowance explain.' },
-  CHECK: { label: 'Check', cls: 'badgeDefault', help: 'More ice cream left than expected — miscount, or a delivery not entered?' },
-  OK: { label: 'OK', cls: 'badgeSuccess', help: '' },
-  NO_SALES: { label: 'No sales file', cls: 'badgeDefault', help: 'Sales By Items not uploaded for this day.' },
-  NOT_COUNTED: { label: 'Not weighed', cls: 'badgeDefault', help: 'Opening or closing weigh is missing.' },
+export const BR_STATUS: Record<BRReportRow['status'], { label: string; cls: 'badgeDanger' | 'badgeSuccess' | 'badgeDefault' | 'badgeWarning'; help: string }> = {
+  OVER: { label: '⚠ OVER LIMIT', cls: 'badgeDanger', help: 'More ice cream gone than sales + wastage + tasting allowance explain.' },
+  CHECK: { label: '🔍 CHECK GAIN', cls: 'badgeWarning', help: 'More ice cream left than expected — miscount, or a delivery not entered?' },
+  OK: { label: '✓ OK', cls: 'badgeSuccess', help: 'Within allowance.' },
+  NO_SALES: { label: '📊 Pending Sales', cls: 'badgeDefault', help: 'Sales By Items not uploaded for this day.' },
+  NOT_COUNTED: { label: '⏳ Pending Weigh', cls: 'badgeDefault', help: 'Opening or closing weigh is missing.' },
 };
 
 /** Grams → "1.25 kg" / "850 g" */

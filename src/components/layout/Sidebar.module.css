@@ -2,7 +2,7 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 260px;
+  width: var(--sidebar-width, 260px);
   height: 100vh;
   background-color: var(--bg-card, rgba(26,26,46,0.8));
   backdrop-filter: blur(12px);
@@ -10,12 +10,16 @@
   display: flex;
   flex-direction: column;
   z-index: 100;
-  transition: transform 0.3s ease;
+  transition: width 0.3s ease, transform 0.3s ease;
 }
 
 .logoArea {
   padding: 24px 20px;
   border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.08));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
 }
 
 .logoTitle {
@@ -26,6 +30,36 @@
   background: linear-gradient(90deg, var(--accent-primary, #ff6b35), var(--accent-secondary, #e91e8c));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+.logoTitleMini {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(90deg, var(--accent-primary, #ff6b35), var(--accent-secondary, #e91e8c));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.collapseToggle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  color: var(--text-secondary, #8888a0);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.collapseToggle:hover {
+  background: rgba(255, 107, 53, 0.15);
+  color: var(--accent-primary, #ff6b35);
+  border-color: rgba(255, 107, 53, 0.3);
 }
 
 .logoSubtitle {
@@ -92,6 +126,9 @@
 
 .icon {
   font-size: 1.125rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .divider {
@@ -131,6 +168,20 @@
   text-transform: capitalize;
 }
 
+.userAvatarMini {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 107, 53, 0.2);
+  color: var(--accent-primary, #ff6b35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin: 0 auto;
+}
+
 .logoutBtn {
   background: transparent;
   border: 1px solid var(--border-color, rgba(255,255,255,0.08));
@@ -152,13 +203,46 @@
   color: var(--danger, #ff1744);
 }
 
+/* Collapsed Sidebar Rules */
+.sidebar.collapsed {
+  width: 72px;
+}
+
+.sidebar.collapsed .logoArea {
+  padding: 18px 10px;
+  justify-content: center;
+  gap: 6px;
+}
+
+.sidebar.collapsed .navLink {
+  padding: 12px 0;
+  justify-content: center;
+}
+
+.sidebar.collapsed .divider {
+  margin: 12px 10px;
+}
+
+.sidebar.collapsed .footer {
+  padding: 16px 10px;
+}
+
+.sidebar.collapsed .logoutBtn {
+  padding: 8px 0;
+}
+
 @media (max-width: 768px) {
   .sidebar {
+    width: 260px !important;
     transform: translateX(-100%);
   }
   
   .sidebarOpen {
     transform: translateX(0);
+  }
+
+  .collapseToggle {
+    display: none;
   }
 }
 
@@ -182,3 +266,4 @@
 @media print {
   .sidebar, .backdrop { display: none !important; }
 }
+

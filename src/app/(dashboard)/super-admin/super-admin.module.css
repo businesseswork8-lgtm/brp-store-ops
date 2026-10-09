@@ -280,15 +280,87 @@
 
 .badgeSuccess,
 .badgeDanger,
+.badgeWarning,
 .badgeDefault {
   display: inline-block;
-  padding: 0.2rem 0.6rem;
+  padding: 0.25rem 0.65rem;
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 
-.badgeSuccess { background: rgba(0, 200, 83, 0.15); color: var(--success, #00c853); }
-.badgeDanger { background: rgba(255, 23, 68, 0.15); color: var(--danger, #ff1744); }
-.badgeDefault { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary, #8888a0); }
+.badgeSuccess {
+  background: rgba(0, 200, 83, 0.12);
+  color: var(--success, #00c853);
+  border: 1px solid rgba(0, 200, 83, 0.25);
+}
+
+.badgeDanger {
+  background: rgba(255, 23, 68, 0.12);
+  color: var(--danger, #ff1744);
+  border: 1px solid rgba(255, 23, 68, 0.25);
+}
+
+.badgeWarning {
+  background: rgba(255, 214, 0, 0.12);
+  color: var(--warning, #ffd600);
+  border: 1px solid rgba(255, 214, 0, 0.25);
+}
+
+.badgeDefault {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary, #8888a0);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Detailed Stock Report Table Styling */
+.alignRight {
+  text-align: right !important;
+}
+
+.alignCenter {
+  text-align: center !important;
+}
+
+.countCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.editCellBtn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary, #8888a0);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  line-height: 1;
+  opacity: 0.3;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.countCell:hover .editCellBtn,
+.editCellBtn:hover {
+  opacity: 1;
+  background: rgba(255, 107, 53, 0.15);
+  border-color: rgba(255, 107, 53, 0.3);
+  color: var(--accent-primary, #ff6b35);
+}
+
+.tableRowOver {
+  background: rgba(255, 23, 68, 0.04) !important;
+}
+
+.tableRowOver td:first-child {
+  border-left: 3px solid var(--danger, #ff1744);
+}
+

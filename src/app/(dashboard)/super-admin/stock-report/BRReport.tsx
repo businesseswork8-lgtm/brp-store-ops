@@ -282,11 +282,11 @@ export function BRReport() {
                 <thead>
                   <tr>
                     <th>Flavour</th>
-                    <th>Packed Boxes ({FULL_BOX_GRAMS}g each)</th>
-                    <th>Open Box on Scale (with box)</th>
-                    <th>Open Box Net (less {EMPTY_BOX_GRAMS}g)</th>
-                    <th>Total Stock (g)</th>
-                    <th>Total Stock (kg)</th>
+                    <th className={styles.alignRight}>Packed Boxes ({FULL_BOX_GRAMS}g)</th>
+                    <th className={styles.alignRight}>Scale Gross</th>
+                    <th className={styles.alignRight}>Open Box Net</th>
+                    <th className={styles.alignRight}>Total Stock (g)</th>
+                    <th className={styles.alignRight}>Total Stock (kg)</th>
                     <th>Last Counted</th>
                   </tr>
                 </thead>
@@ -299,13 +299,13 @@ export function BRReport() {
                           {i.name}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{i.range_name}</div>
                         </td>
-                        <td>{i.unopened_boxes ? `${i.unopened_boxes} box${i.unopened_boxes > 1 ? 'es' : ''}` : '0'}</td>
-                        <td>{i.open_box_gross ? `${i.open_box_gross.toLocaleString('en-IN')} g` : '—'}</td>
-                        <td>{openNet > 0 ? `${openNet.toLocaleString('en-IN')} g` : '—'}</td>
-                        <td style={{ fontWeight: 700, color: i.net_grams > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                        <td className={styles.alignRight}>{i.unopened_boxes ? `${i.unopened_boxes} box${i.unopened_boxes > 1 ? 'es' : ''}` : '0'}</td>
+                        <td className={styles.alignRight}>{i.open_box_gross ? `${i.open_box_gross.toLocaleString('en-IN')} g` : '—'}</td>
+                        <td className={styles.alignRight}>{openNet > 0 ? `${openNet.toLocaleString('en-IN')} g` : '—'}</td>
+                        <td className={styles.alignRight} style={{ fontWeight: 700, color: i.net_grams > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                           {i.net_grams.toLocaleString('en-IN')} g
                         </td>
-                        <td style={{ fontWeight: 700, color: i.net_grams > 0 ? 'var(--success)' : 'var(--text-secondary)' }}>
+                        <td className={styles.alignRight} style={{ fontWeight: 700, color: i.net_grams > 0 ? 'var(--success)' : 'var(--text-secondary)' }}>
                           {(i.net_grams / 1000).toFixed(2)} kg
                         </td>
                         <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
@@ -421,13 +421,13 @@ export function BRReport() {
                   <thead>
                     <tr>
                       <th>Flavour</th>
-                      <th>Used from Tub</th>
-                      <th>Sold (POS)</th>
-                      <th>5% Tasting Allowance</th>
-                      <th>Wasted</th>
-                      <th>Shortage (g)</th>
-                      <th>Shortage (kg)</th>
-                      <th>Status</th>
+                      <th className={styles.alignRight}>Used from Tub</th>
+                      <th className={styles.alignRight}>Sold (POS)</th>
+                      <th className={styles.alignRight}>5% Allowance</th>
+                      <th className={styles.alignRight}>Wasted</th>
+                      <th className={styles.alignRight}>Shortage (g)</th>
+                      <th className={styles.alignRight}>Shortage (kg)</th>
+                      <th className={styles.alignCenter}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -437,17 +437,17 @@ export function BRReport() {
                           {r.flavour}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div>
                         </td>
-                        <td>{grams(r.used)}</td>
-                        <td>{grams(r.sold)}</td>
-                        <td>{grams(r.calculatedAllowance)}</td>
-                        <td>{r.wasted ? grams(r.wasted) : '—'}</td>
-                        <td style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.05rem' }}>
+                        <td className={styles.alignRight}>{grams(r.used)}</td>
+                        <td className={styles.alignRight}>{grams(r.sold)}</td>
+                        <td className={styles.alignRight}>{grams(r.calculatedAllowance)}</td>
+                        <td className={styles.alignRight}>{r.wasted ? grams(r.wasted) : '—'}</td>
+                        <td className={styles.alignRight} style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.05rem' }}>
                           +{grams(r.shortageGrams)}
                         </td>
-                        <td style={{ fontWeight: 700, color: 'var(--danger)' }}>
+                        <td className={styles.alignRight} style={{ fontWeight: 700, color: 'var(--danger)' }}>
                           +{(r.shortageGrams / 1000).toFixed(3)} kg
                         </td>
-                        <td>
+                        <td className={styles.alignCenter}>
                           <span className={styles.badgeDanger}>⚠ OVER LIMIT</span>
                         </td>
                       </tr>
@@ -481,46 +481,67 @@ export function BRReport() {
               <table className={styles.table}>
                 <thead>
                   <tr>
-                    <th>Flavour</th><th>Opening</th><th>Received</th><th>Closing</th><th>Used</th>
-                    <th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance (5%)</th><th>Overnight</th><th>Status</th>
+                    <th>Flavour</th>
+                    <th className={styles.alignRight}>Opening</th>
+                    <th className={styles.alignRight}>Received</th>
+                    <th className={styles.alignRight}>Closing</th>
+                    <th className={styles.alignRight}>Used</th>
+                    <th className={styles.alignRight}>Sold</th>
+                    <th className={styles.alignRight}>Wasted</th>
+                    <th className={styles.alignRight}>Gap</th>
+                    <th className={styles.alignRight}>Allowance (5%)</th>
+                    <th className={styles.alignRight}>Overnight</th>
+                    <th className={styles.alignCenter}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map(r => {
                     const st = BR_STATUS[r.computedStatus] || { label: r.computedStatus, cls: 'badgeDefault', help: '' };
+                    const isOver = r.computedStatus === 'OVER';
                     return (
-                      <tr key={r.item_id}>
-                        <td style={{ fontWeight: 600 }}>{r.flavour}<div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div></td>
-                        <td>
-                          {r.opening !== null ? grams(r.opening) : '—'}
-                          {' '}
-                          <button
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.7 }}
-                            onClick={() => openEditModal(r.item_id, r.flavour, 'opening')}
-                            title="Edit opening count"
-                          >
-                            ✏️
-                          </button>
+                      <tr key={r.item_id} className={isOver ? styles.tableRowOver : undefined}>
+                        <td style={{ fontWeight: 600 }}>
+                          {r.flavour}
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div>
                         </td>
-                        <td>{r.received ? grams(r.received) : '—'}</td>
-                        <td>
-                          {r.closing !== null ? grams(r.closing) : <span style={{ color: 'var(--text-secondary)' }}>Pending night weigh</span>}
-                          {' '}
-                          <button
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.7 }}
-                            onClick={() => openEditModal(r.item_id, r.flavour, 'closing')}
-                            title="Edit closing count"
-                          >
-                            ✏️
-                          </button>
+                        <td className={styles.alignRight}>
+                          <div className={styles.countCell}>
+                            <span>{r.opening !== null ? grams(r.opening) : '—'}</span>
+                            <button
+                              className={styles.editCellBtn}
+                              onClick={() => openEditModal(r.item_id, r.flavour, 'opening')}
+                              title="Edit opening count"
+                            >
+                              ✏️ Edit
+                            </button>
+                          </div>
                         </td>
-                        <td>{r.used !== null ? grams(r.used) : '—'}</td>
-                        <td>{grams(r.sold)}</td>
-                        <td>{r.wasted ? grams(r.wasted) : '—'}</td>
-                        <td style={{ fontWeight: 600, color: r.computedStatus === 'OVER' ? 'var(--danger)' : undefined }}>{signedGrams(r.gap)}</td>
-                        <td>{grams(r.calculatedAllowance)}</td>
-                        <td style={{ color: (r.overnight_change ?? 0) < -50 ? 'var(--warning)' : undefined }}>{signedGrams(r.overnight_change)}</td>
-                        <td><span className={styles[st.cls]} title={st.help}>{st.label}</span></td>
+                        <td className={styles.alignRight}>{r.received ? grams(r.received) : '—'}</td>
+                        <td className={styles.alignRight}>
+                          <div className={styles.countCell}>
+                            <span>{r.closing !== null ? grams(r.closing) : <span style={{ color: 'var(--text-secondary)' }}>Pending weigh</span>}</span>
+                            <button
+                              className={styles.editCellBtn}
+                              onClick={() => openEditModal(r.item_id, r.flavour, 'closing')}
+                              title="Edit closing count"
+                            >
+                              ✏️ Edit
+                            </button>
+                          </div>
+                        </td>
+                        <td className={styles.alignRight}>{r.used !== null ? grams(r.used) : '—'}</td>
+                        <td className={styles.alignRight}>{grams(r.sold)}</td>
+                        <td className={styles.alignRight}>{r.wasted ? grams(r.wasted) : '—'}</td>
+                        <td className={styles.alignRight} style={{ fontWeight: 600, color: isOver ? 'var(--danger)' : undefined }}>
+                          {signedGrams(r.gap)}
+                        </td>
+                        <td className={styles.alignRight}>{grams(r.calculatedAllowance)}</td>
+                        <td className={styles.alignRight} style={{ color: (r.overnight_change ?? 0) < -50 ? 'var(--warning)' : undefined }}>
+                          {signedGrams(r.overnight_change)}
+                        </td>
+                        <td className={styles.alignCenter}>
+                          <span className={styles[st.cls]} title={st.help}>{st.label}</span>
+                        </td>
                       </tr>
                     );
                   })}
