@@ -244,6 +244,30 @@ export default function UploadPage() {
     }
   };
 
+  const handleClearSalesForDate = async () => {
+    if (!store || !itemsDate) return;
+    if (!confirm(`Are you sure you want to remove all uploaded sales data for ${store.name} on ${itemsDate}? This will delete test dump data so you can re-upload clean files.`)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.rpc('delete_sales_data', {
+        p_store_id: store.id,
+        p_date: itemsDate,
+      });
+      if (error) throw error;
+      setMessage({
+        type: 'success',
+        text: `🗑️ Sales data for ${itemsDate} has been completely removed. You can now upload fresh lifetime/historical files.`,
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Could not clear sales data: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!store) {
     return (
       <div className={styles.container}>
@@ -316,6 +340,15 @@ export default function UploadPage() {
               title="Choose custom date"
               aria-label="Target sales date"
             />
+            <button
+              type="button"
+              className={styles.dateBtn}
+              style={{ marginLeft: 'auto', background: 'rgba(255, 23, 68, 0.1)', color: 'var(--danger)', borderColor: 'rgba(255, 23, 68, 0.3)' }}
+              onClick={handleClearSalesForDate}
+              title="Delete sales data for selected date"
+            >
+              🗑️ Delete Sales for {formatShortDate(itemsDate)}
+            </button>
           </div>
         </div>
       )}

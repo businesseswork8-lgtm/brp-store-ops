@@ -25,7 +25,7 @@ type InventoryItem = {
 
 /** Baskin Robbins: Current inventory on hand + daily reconciliation report. */
 export function BRReport() {
-  const { supabase, store } = useActiveStore();
+  const { supabase, store, profile } = useActiveStore();
   const [activeTab, setActiveTab] = useState<'inventory' | 'reconciliation'>('inventory');
   const [date, setDate] = useState(istDate());
   const [rows, setRows] = useState<BRReportRow[]>([]);
@@ -349,6 +349,30 @@ export function BRReport() {
                   onClick={() => setDate(addDays(istDate(), -1))}
                 >
                   ‹ Yesterday ({fmtDate(addDays(istDate(), -1))})
+                </button>
+              )}
+              {!noSales && (profile?.role === 'super_admin' || profile?.role === 'admin') && (
+                <button
+                  className={styles.secondaryButton}
+                  style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem', color: 'var(--danger)', borderColor: 'rgba(255,23,68,0.3)' }}
+                  onClick={async () => {
+                    if (!store) return;
+                    if (!confirm(`Are you sure you want to remove all uploaded sales data for ${store.name} on ${date}? This will delete test dump records so you can re-upload clean files.`)) return;
+                    setLoading(true);
+                    try {
+                      const { error } = await supabase.rpc('delete_sales_data', { p_store_id: store.id, p_date: date });
+                      if (error) throw error;
+                      await load();
+                    } catch (err) {
+                      console.error(err);
+                      alert('Could not clear sales data: ' + (err instanceof Error ? err.message : String(err)));
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  title="Delete uploaded sales data for this date"
+                >
+                  🗑️ Clear Sales for {fmtDate(date)}
                 </button>
               )}
             </div>
