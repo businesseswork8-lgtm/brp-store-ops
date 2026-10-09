@@ -364,3 +364,146 @@
   border-left: 3px solid var(--danger, #ff1744);
 }
 
+.tabBar {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  padding-bottom: 1rem;
+}
+
+.reconciliationHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.reconciliationControls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.stickyCol {
+  position: sticky;
+  left: 0;
+  background: var(--bg-card, #161622) !important;
+  z-index: 5;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.4);
+  min-width: 140px;
+  max-width: 180px;
+  white-space: normal !important;
+  word-break: break-word;
+}
+
+/* ---------- Mobile Responsiveness ---------- */
+@media (max-width: 768px) {
+  .container {
+    padding: 0.75rem;
+    gap: 1rem;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .title {
+    font-size: 1.35rem;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+  }
+
+  .tabBar {
+    flex-direction: column;
+    gap: 0.5rem;
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .tabBar button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .statGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+
+  .statCard {
+    padding: 0.85rem;
+    gap: 0.25rem;
+  }
+
+  .statLabel {
+    font-size: 0.78rem;
+  }
+
+  .statValue {
+    font-size: 1.25rem;
+  }
+
+  .reconciliationHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .reconciliationControls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .reconciliationControls input[type="date"] {
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .card {
+    padding: 0.75rem;
+    border-radius: 8px;
+  }
+
+  .table th,
+  .table td,
+  .reportTable th,
+  .reportTable td {
+    padding: 0.6rem 0.45rem;
+    font-size: 0.8rem;
+  }
+
+  .countCell {
+    gap: 0.2rem;
+  }
+
+  .editCellBtn {
+    padding: 0.15rem 0.3rem;
+    font-size: 0.68rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .statGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .reconciliationControls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reconciliationControls button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+

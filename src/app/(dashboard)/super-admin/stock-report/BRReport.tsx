@@ -225,17 +225,17 @@ export function BRReport() {
       </div>
 
       {/* Main Tabs */}
-      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '1rem' }}>
+      <div className={styles.tabBar}>
         <button
           className={activeTab === 'inventory' ? styles.primaryButton : styles.secondaryButton}
-          style={{ padding: '0.65rem 1.25rem', fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          style={{ padding: '0.65rem 1.25rem', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           onClick={() => setActiveTab('inventory')}
         >
           📦 Current Inventory On Hand ({flavoursWithStock}/{inventory.length})
         </button>
         <button
           className={activeTab === 'reconciliation' ? styles.primaryButton : styles.secondaryButton}
-          style={{ padding: '0.65rem 1.25rem', fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          style={{ padding: '0.65rem 1.25rem', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           onClick={() => setActiveTab('reconciliation')}
         >
           📊 Daily Variance &amp; Consumption
@@ -260,7 +260,7 @@ export function BRReport() {
             </div>
           </div>
 
-          <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               type="text"
               className={styles.searchInput}
@@ -281,7 +281,7 @@ export function BRReport() {
               <table className={styles.table}>
                 <thead>
                   <tr>
-                    <th>Flavour</th>
+                    <th className={styles.stickyCol}>Flavour</th>
                     <th className={styles.alignRight}>Packed Boxes ({FULL_BOX_GRAMS}g)</th>
                     <th className={styles.alignRight}>Scale Gross</th>
                     <th className={styles.alignRight}>Open Box Net</th>
@@ -295,7 +295,7 @@ export function BRReport() {
                     const openNet = i.open_box_gross > EMPTY_BOX_GRAMS ? i.open_box_gross - EMPTY_BOX_GRAMS : 0;
                     return (
                       <tr key={i.item_id}>
-                        <td style={{ fontWeight: 600 }}>
+                        <td className={styles.stickyCol} style={{ fontWeight: 600 }}>
                           {i.name}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{i.range_name}</div>
                         </td>
@@ -332,13 +332,13 @@ export function BRReport() {
       {/* TAB 2: DAILY RECONCILIATION */}
       {activeTab === 'reconciliation' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div className={styles.reconciliationHeader}>
             <div>
               <p className={styles.subtitle} style={{ margin: 0 }}>
                 Per flavour: <strong>used</strong> = opening + received − closing. <strong>Gap</strong> = used − sold − wasted.
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className={styles.reconciliationControls}>
               <button className={styles.secondaryButton} onClick={() => setDate(d => addDays(d, -1))}>‹</button>
               <input type="date" className={styles.searchInput} value={date} max={istDate()} onChange={e => e.target.value && setDate(e.target.value)} />
               <button className={styles.secondaryButton} onClick={() => setDate(d => addDays(d, 1))} disabled={date >= istDate()}>›</button>
@@ -444,7 +444,7 @@ export function BRReport() {
                 <table className={styles.table}>
                   <thead>
                     <tr>
-                      <th>Flavour</th>
+                      <th className={styles.stickyCol}>Flavour</th>
                       <th className={styles.alignRight}>Used from Tub</th>
                       <th className={styles.alignRight}>Sold (POS)</th>
                       <th className={styles.alignRight}>5% Allowance</th>
@@ -457,7 +457,7 @@ export function BRReport() {
                   <tbody>
                     {over.sort((a, b) => b.shortageGrams - a.shortageGrams).map(r => (
                       <tr key={r.item_id} style={{ background: 'rgba(255,23,68,0.05)' }}>
-                        <td style={{ fontWeight: 600 }}>
+                        <td className={styles.stickyCol} style={{ fontWeight: 600 }}>
                           {r.flavour}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div>
                         </td>
@@ -505,7 +505,7 @@ export function BRReport() {
               <table className={styles.table}>
                 <thead>
                   <tr>
-                    <th>Flavour</th>
+                    <th className={styles.stickyCol}>Flavour</th>
                     <th className={styles.alignRight}>Opening</th>
                     <th className={styles.alignRight}>Received</th>
                     <th className={styles.alignRight}>Closing</th>
@@ -524,7 +524,7 @@ export function BRReport() {
                     const isOver = r.computedStatus === 'OVER';
                     return (
                       <tr key={r.item_id} className={isOver ? styles.tableRowOver : undefined}>
-                        <td style={{ fontWeight: 600 }}>
+                        <td className={styles.stickyCol} style={{ fontWeight: 600 }}>
                           {r.flavour}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div>
                         </td>
