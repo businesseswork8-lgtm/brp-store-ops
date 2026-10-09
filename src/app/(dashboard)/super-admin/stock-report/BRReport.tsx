@@ -35,6 +35,59 @@ export function BRReport() {
   const [loading, setLoading] = useState(true);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [invSearch, setInvSearch] = useState('');
+  const [countsForDate, setCountsForDate] = useState<Record<string, Record<'opening' | 'closing', { unopened_boxes: number; open_box_gross: number }>>>({});
+  const [editModal, setEditModal] = useState<{
+    item_id: string;
+    flavour: string;
+    session: 'opening' | 'closing';
+    unopened_boxes: number;
+    open_box_gross: number;
+  } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const openEditModal = (item_id: string, flavour: string, session: 'opening' | 'closing') => {
+    const existing = countsForDate[item_id]?.[session] || { unopened_boxes: 0, open_box_gross: 0 };
+    setEditModal({
+      item_id,
+      flavour,
+      session,
+      unopened_boxes: existing.unopened_boxes,
+      open_box_gross: existing.open_box_gross,
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!store || !editModal) return;
+    setSavingEdit(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const unopened = Number(editModal.unopened_boxes) || 0;
+      const gross = Number(editModal.open_box_gross) || 0;
+      const openNet = gross > 0 ? Math.max(0, gross - EMPTY_BOX_GRAMS) : 0;
+      const computedGrams = unopened * FULL_BOX_GRAMS + openNet;
+
+      const { error } = await supabase.from('br_flavour_counts').upsert({
+        store_id: store.id,
+        item_id: editModal.item_id,
+        count_date: date,
+        session: editModal.session,
+        unopened_boxes: unopened,
+        open_box_gross: gross,
+        grams: computedGrams,
+        submitted_by_profile_id: user?.id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'store_id,item_id,count_date,session' });
+
+      if (error) throw error;
+      setEditModal(null);
+      await load();
+    } catch (err) {
+      console.error(err);
+      alert('Could not save count correction.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!store) return;
@@ -65,7 +118,18 @@ export function BRReport() {
 
       setError(e ? e.message : null);
       setRows(e ? [] : toReportRows(reportData));
-      setUnmatched(((lines || []) as { matched_by: string; quantity: number }[]).filter(l => l.matched_by === 'none').length);
+      const countsMap: Record<string, Record<'opening' | 'closing', { unopened_boxes: number; open_box_gross: number }>> = {};
+      (recentCounts || []).forEach(c => {
+        if (c.count_date === date) {
+          if (!countsMap[c.item_id]) countsMap[c.item_id] = { opening: { unopened_boxes: 0, open_box_gross: 0 }, closing: { unopened_boxes: 0, open_box_gross: 0 } };
+          const ses = c.session as 'opening' | 'closing';
+          countsMap[c.item_id][ses] = {
+            unopened_boxes: Number(c.unopened_boxes) || 0,
+            open_box_gross: Number(c.open_box_gross) || 0,
+          };
+        }
+      });
+      setCountsForDate(countsMap);
 
       // Build current inventory on hand from the latest count of each flavour
       const latestByItem: Record<string, {
@@ -425,9 +489,29 @@ export function BRReport() {
                     return (
                       <tr key={r.item_id}>
                         <td style={{ fontWeight: 600 }}>{r.flavour}<div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div></td>
-                        <td>{r.opening !== null ? grams(r.opening) : '—'}</td>
+                        <td>
+                          {r.opening !== null ? grams(r.opening) : '—'}
+                          {' '}
+                          <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.7 }}
+                            onClick={() => openEditModal(r.item_id, r.flavour, 'opening')}
+                            title="Edit opening count"
+                          >
+                            ✏️
+                          </button>
+                        </td>
                         <td>{r.received ? grams(r.received) : '—'}</td>
-                        <td>{r.closing !== null ? grams(r.closing) : <span style={{ color: 'var(--text-secondary)' }}>Pending night weigh</span>}</td>
+                        <td>
+                          {r.closing !== null ? grams(r.closing) : <span style={{ color: 'var(--text-secondary)' }}>Pending night weigh</span>}
+                          {' '}
+                          <button
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.7 }}
+                            onClick={() => openEditModal(r.item_id, r.flavour, 'closing')}
+                            title="Edit closing count"
+                          >
+                            ✏️
+                          </button>
+                        </td>
                         <td>{r.used !== null ? grams(r.used) : '—'}</td>
                         <td>{grams(r.sold)}</td>
                         <td>{r.wasted ? grams(r.wasted) : '—'}</td>
@@ -443,6 +527,79 @@ export function BRReport() {
             </div>
           )}
         </>
+      )}
+
+      {editModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999
+        }}>
+          <div className={styles.card} style={{ width: '100%', maxWidth: 440, padding: '1.5rem', background: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+            <h3 style={{ margin: '0 0 0.5rem' }}>
+              ✏️ Edit {editModal.session === 'opening' ? 'Opening' : 'Closing'} Count
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
+              Flavour: <strong>{editModal.flavour}</strong> · Date: <strong>{date}</strong>
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                  Unopened Sealed Boxes (2,250 g each):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  className={styles.searchInput}
+                  style={{ width: '100%' }}
+                  value={editModal.unopened_boxes}
+                  onChange={e => setEditModal({ ...editModal, unopened_boxes: parseInt(e.target.value, 10) || 0 })}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                  Open Box Scale Weight (with box, in grams):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  className={styles.searchInput}
+                  style={{ width: '100%' }}
+                  placeholder="e.g. 1539 (leave 0 if no open box)"
+                  value={editModal.open_box_gross || ''}
+                  onChange={e => setEditModal({ ...editModal, open_box_gross: parseInt(e.target.value, 10) || 0 })}
+                />
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  130 g empty box tare will be deducted automatically.
+                </div>
+              </div>
+
+              <div style={{ padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: 6, fontSize: '0.9rem', fontWeight: 600 }}>
+                Computed Weight: {grams(
+                  (editModal.unopened_boxes || 0) * FULL_BOX_GRAMS +
+                  (editModal.open_box_gross > 0 ? Math.max(0, editModal.open_box_gross - EMPTY_BOX_GRAMS) : 0)
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                className={styles.secondaryButton}
+                disabled={savingEdit}
+                onClick={() => setEditModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.primaryButton}
+                disabled={savingEdit}
+                onClick={handleSaveEdit}
+              >
+                {savingEdit ? 'Saving…' : '💾 Save Correction'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
