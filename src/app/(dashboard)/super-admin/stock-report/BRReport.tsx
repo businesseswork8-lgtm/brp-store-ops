@@ -183,13 +183,15 @@ export function BRReport() {
     const allow = effectiveAllowance(r);
     const gap = r.gap ?? 0;
     const isCounted = r.opening !== null && r.closing !== null;
-    const isOver = isCounted && gap > allow;
-    const shortageGrams = isOver ? gap - allow : 0;
+    const netShortage = gap - allow;
+    // Require a practical minimum threshold of 50g (less than 1 small scoop) to trigger an OVER LIMIT shortage alert
+    const isOver = isCounted && netShortage >= 50;
+    const shortageGrams = isOver ? netShortage : 0;
     return {
       ...r,
       calculatedAllowance: allow,
       shortageGrams,
-      computedStatus: (!isCounted ? 'NOT_COUNTED' : isOver ? 'OVER' : gap < -allow ? 'CHECK' : 'OK') as BRReportRow['status'],
+      computedStatus: (!isCounted ? 'NOT_COUNTED' : isOver ? 'OVER' : gap < -allow - 50 ? 'CHECK' : 'OK') as BRReportRow['status'],
     };
   });
 
