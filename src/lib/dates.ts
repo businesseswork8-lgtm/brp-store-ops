@@ -37,3 +37,35 @@ export function displayDate(d?: Date): string {
     timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
   })
 }
+
+/**
+ * Format timestamp in IST as time only, e.g. "11:15 AM" or "2:30 AM"
+ */
+export function formatTime(iso: string | Date | null | undefined): string {
+  if (!iso) return ''
+  const d = typeof iso === 'string' ? new Date(iso) : iso
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('en-IN', {
+    timeZone: IST,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).toUpperCase()
+}
+
+/**
+ * Format timestamp in IST with date and time, e.g. "9 Oct, 2:30 AM" or "8 Oct, 11:15 AM"
+ */
+export function formatDateTime(iso: string | Date | null | undefined): string {
+  if (!iso) return ''
+  const d = typeof iso === 'string' ? new Date(iso) : iso
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-IN', {
+    timeZone: IST,
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).toUpperCase()
+}

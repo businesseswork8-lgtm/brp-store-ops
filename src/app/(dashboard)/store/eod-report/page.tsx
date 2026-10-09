@@ -4,10 +4,9 @@ import React, { useCallback, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { displayUnit, toDisplay } from '@/lib/stock/units';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate } from '@/lib/dates';
+import { istDate, formatDateTime, formatTime } from '@/lib/dates';
 import styles from '../store.module.css';
 import { isBRStore, toReportRows, BRReportRow, grams, signedGrams } from '@/lib/br';
-
 
 export default function EODReportPage() {
   const { supabase, store: activeStore, loading: storeLoading } = useActiveStore();
@@ -17,10 +16,14 @@ export default function EODReportPage() {
   const [loading, setLoading] = useState(true);
 
   const [posSales, setPosSales] = useState<any>(null);
-  const [morningCash, setMorningCash] = useState<number | null>(null);
-  const [eveningCash, setEveningCash] = useState<number | null>(null);
+  const [morningCashData, setMorningCashData] = useState<any>(null);
+  const [eveningCashData, setEveningCashData] = useState<any>(null);
   const [cashTransactions, setCashTransactions] = useState<any[]>([]);
-  const [wastageCount, setWastageCount] = useState(0);
+  const [wastageList, setWastageList] = useState<any[]>([]);
+  const [deliveriesList, setDeliveriesList] = useState<any[]>([]);
+  const [openingWeighInfo, setOpeningWeighInfo] = useState<{ count: number; time: string | null } | null>(null);
+  const [closingWeighInfo, setClosingWeighInfo] = useState<{ count: number; time: string | null } | null>(null);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [varianceAlerts, setVarianceAlerts] = useState<any[]>([]);
   const [stockNote, setStockNote] = useState<string | null>(null);
@@ -37,29 +40,63 @@ export default function EODReportPage() {
       { data: cash },
       { data: txs },
       { data: wastage },
-      { data: rpcData, error: rpcErr }
+      { data: deliveries },
+      { data: flavourCounts },
+      { data: rpcData, error: rpcErr },
     ] = await Promise.all([
-      supabase.from('daily_sales_summary').select('*').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
-      supabase.from('daily_cash_tally').select('tally_type, total_amount').eq('store_id', storeId).eq('entry_date', selectedDate),
-      supabase.from('daily_cash_transactions').select('*').eq('store_id', storeId).eq('entry_date', selectedDate),
-      supabase.from('daily_wastage_log').select('id').eq('store_id', storeId).eq('entry_date', selectedDate),
+      supabase.from('daily_sales_summary').select('*, staff_members(name)').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
+      supabase.from('daily_cash_tally').select('*, staff_members(name)').eq('store_id', storeId).eq('entry_date', selectedDate),
+      supabase.from('daily_cash_transactions').select('*, staff_members(name)').eq('store_id', storeId).eq('entry_date', selectedDate).order('created_at', { ascending: true }),
+      supabase.from('daily_wastage_log').select('id, quantity_wasted, created_at, items(name)').eq('store_id', storeId).eq('entry_date', selectedDate).order('created_at', { ascending: true }),
+      supabase.from('purchase_orders').select('id, quantity, created_at, items(name)').eq('store_id', storeId).eq('entry_date', selectedDate).order('created_at', { ascending: true }),
+      supabase.from('br_flavour_counts').select('session, created_at, updated_at, staff_members(name)').eq('store_id', storeId).eq('count_date', selectedDate),
       supabase.rpc('stock_variance_report', { p_store_id: storeId, p_from: null, p_to: selectedDate }),
     ]);
 
     if (isBRStore(activeStore)) {
       const { data: br, error: brErr } = await supabase.rpc('br_daily_report', { p_store_id: storeId, p_date: selectedDate });
       setBrRows(brErr ? [] : toReportRows(br));
-    } else setBrRows(null);
+    } else {
+      setBrRows(null);
+    }
+
     setPosSales(salesData && salesData.has_summary !== false ? salesData : null);
+
     const m = cash?.find(c => c.tally_type === 'morning');
     const e = cash?.find(c => c.tally_type === 'evening');
-    setMorningCash(m ? Number(m.total_amount) : null);
-    setEveningCash(e ? Number(e.total_amount) : null);
+    setMorningCashData(m || null);
+    setEveningCashData(e || null);
+
     setCashTransactions(txs || []);
-    setWastageCount(wastage?.length || 0);
+    setWastageList(wastage || []);
+    setDeliveriesList(deliveries || []);
+
+    // Compute flavour count timings
+    if (flavourCounts && flavourCounts.length > 0) {
+      const openCounts = flavourCounts.filter(f => f.session === 'opening');
+      const closeCounts = flavourCounts.filter(f => f.session === 'closing');
+
+      const latestOpen = openCounts.reduce<string | null>((latest, f) => {
+        const t = f.updated_at || f.created_at;
+        return !latest || (t && t > latest) ? t : latest;
+      }, null);
+
+      const latestClose = closeCounts.reduce<string | null>((latest, f) => {
+        const t = f.updated_at || f.created_at;
+        return !latest || (t && t > latest) ? t : latest;
+      }, null);
+
+      setOpeningWeighInfo(openCounts.length > 0 ? { count: openCounts.length, time: latestOpen } : null);
+      setClosingWeighInfo(closeCounts.length > 0 ? { count: closeCounts.length, time: latestClose } : null);
+    } else {
+      setOpeningWeighInfo(null);
+      setClosingWeighInfo(null);
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = ((rpcData as any[]) || []);
     setStockError(rpcErr ? rpcErr.message : null);
+
     // Items counted on this day, checked against their previous count
     const today = rows.filter(r => r.closing_date === selectedDate);
     setVarianceAlerts(today.filter(r => r.status === 'SHORT' || r.status === 'CHECK_RECEIVED'));
@@ -68,11 +105,15 @@ export default function EODReportPage() {
       rpcErr ? null
       : today.length === 0 ? 'No stock was counted on this day (or items have no earlier count yet).'
       : incomplete ? `${incomplete} item(s) can't be checked yet — Rista usage not uploaded for some days, or item not linked to Rista.`
-      : null);
+      : null
+    );
     setLoading(false);
   }, [supabase, activeStore, selectedDate, storeLoading]);
 
   useEffect(() => { loadStoreData(); }, [loadStoreData]);
+
+  const morningCash = morningCashData ? Number(morningCashData.total_amount) : null;
+  const eveningCash = eveningCashData ? Number(eveningCashData.total_amount) : null;
 
   const expensesTotal = cashTransactions
     .filter(t => t.tx_type === 'expense')
@@ -118,13 +159,13 @@ export default function EODReportPage() {
           >
             🖨️ Print / Save PDF
           </button>
-          <Link href="/store" className={styles.backLink}>← Back</Link>
+          <Link href="/store" className={styles.backLink}>← Back to Store</Link>
         </div>
       </header>
 
       {/* Date Filter Bar */}
       <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Target Store</span>
             <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
@@ -134,7 +175,7 @@ export default function EODReportPage() {
 
           <div>
             <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-              Report Date
+              Shift Operating Date
             </label>
             <input
               type="date"
@@ -153,9 +194,137 @@ export default function EODReportPage() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+          {/* Operations Audit Trail & Timestamps */}
+          <div className={styles.timelineCard}>
+            <div className={styles.timelineTitle}>
+              🕒 Operational Timeline & Exact Activity Timestamps ({selectedDate})
+            </div>
+            <p className={styles.subtitle} style={{ marginBottom: '1rem' }}>
+              Exact time and data when staff performed each opening, closing, cash, and stock action:
+            </p>
+            <div className={styles.timelineGrid}>
+              {/* Morning Cash */}
+              <div className={`${styles.timelineItem} ${morningCashData ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>💰 Opening Cash Count</span>
+                  {morningCashData?.created_at ? (
+                    <span className={styles.timelineTime}>{formatDateTime(morningCashData.created_at)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>Not counted</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {morningCashData
+                    ? `${formatCurrency(morningCashData.total_amount)}${morningCashData.staff_members?.name ? ` · by ${morningCashData.staff_members.name}` : ''}`
+                    : 'Drawer cash at opening'}
+                </div>
+              </div>
+
+              {/* Opening Stock Weigh */}
+              <div className={`${styles.timelineItem} ${openingWeighInfo ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>🍨 Opening Flavour Weigh</span>
+                  {openingWeighInfo?.time ? (
+                    <span className={styles.timelineTime}>{formatDateTime(openingWeighInfo.time)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>Not weighed</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {openingWeighInfo ? `${openingWeighInfo.count} flavours weighed before opening` : 'Opening stock count'}
+                </div>
+              </div>
+
+              {/* Deliveries */}
+              <div className={`${styles.timelineItem} ${deliveriesList.length > 0 ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>🚚 Stock Deliveries</span>
+                  {deliveriesList.length > 0 ? (
+                    <span className={styles.timelineTime}>{formatDateTime(deliveriesList[deliveriesList.length - 1].created_at)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>None</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {deliveriesList.length > 0 ? `${deliveriesList.length} delivery receipt(s) entered` : 'No deliveries recorded'}
+                </div>
+              </div>
+
+              {/* Wastage */}
+              <div className={`${styles.timelineItem} ${wastageList.length > 0 ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>🗑️ Wastage Logged</span>
+                  {wastageList.length > 0 ? (
+                    <span className={styles.timelineTime}>{formatDateTime(wastageList[wastageList.length - 1].created_at)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>None</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {wastageList.length > 0 ? `${wastageList.length} wastage log(s) recorded` : 'No wastage logged'}
+                </div>
+              </div>
+
+              {/* Closing Stock Weigh */}
+              <div className={`${styles.timelineItem} ${closingWeighInfo ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>🍨 Closing Flavour Weigh</span>
+                  {closingWeighInfo?.time ? (
+                    <span className={styles.timelineTime}>{formatDateTime(closingWeighInfo.time)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>Not weighed</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {closingWeighInfo ? `${closingWeighInfo.count} flavours weighed at closing` : 'Closing inventory after last bill'}
+                </div>
+              </div>
+
+              {/* Evening Cash */}
+              <div className={`${styles.timelineItem} ${eveningCashData ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>💰 Closing Cash Count</span>
+                  {eveningCashData?.created_at ? (
+                    <span className={styles.timelineTime}>{formatDateTime(eveningCashData.created_at)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>Not counted</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {eveningCashData
+                    ? `${formatCurrency(eveningCashData.total_amount)}${eveningCashData.staff_members?.name ? ` · by ${eveningCashData.staff_members.name}` : ''}`
+                    : 'Drawer cash at closing'}
+                </div>
+              </div>
+
+              {/* Rista Upload */}
+              <div className={`${styles.timelineItem} ${posSales ? styles.timelineItemDone : ''}`}>
+                <div className={styles.timelineHeader}>
+                  <span className={styles.timelineLabel}>📄 Rista Sales Upload</span>
+                  {posSales?.created_at ? (
+                    <span className={styles.timelineTime}>{formatDateTime(posSales.created_at)}</span>
+                  ) : (
+                    <span className={styles.timelineTimeMissing}>Not uploaded</span>
+                  )}
+                </div>
+                <div className={styles.timelineMeta}>
+                  {posSales ? `Net: ${formatCurrency(posSales.net_sales)} · ${posSales.total_orders || 0} orders` : 'Rista daily sales files'}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Section 1: Sales Revenue Summary */}
           <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>1. Sales</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h3 style={{ margin: 0, color: 'var(--accent-primary)' }}>1. Sales Summary</h3>
+              {posSales?.created_at && (
+                <span className={styles.timeBadge} style={{ background: 'rgba(0,200,83,0.1)', color: '#81c784' }}>
+                  🕒 Uploaded on {formatDateTime(posSales.created_at)}
+                </span>
+              )}
+            </div>
             {posSales ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
                 <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
@@ -222,20 +391,32 @@ export default function EODReportPage() {
 
           {/* Section 2: Cash Denomination Tallies */}
           <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>2. Cash Check</h3>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>2. Cash Reconciliation</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Morning cash count</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Morning cash count (Opening)</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '0.25rem' }}>
                   {morningCash !== null ? formatCurrency(morningCash) : <span style={{ color: 'var(--warning)', fontSize: '1rem' }}>Pending</span>}
                 </div>
+                {morningCashData?.created_at && (
+                  <div style={{ fontSize: '0.775rem', color: '#81c784', marginTop: '0.35rem' }}>
+                    🕒 Counted at {formatDateTime(morningCashData.created_at)}
+                    {morningCashData.staff_members?.name ? ` by ${morningCashData.staff_members.name}` : ''}
+                  </div>
+                )}
               </div>
 
               <div style={{ padding: '1rem', background: 'var(--bg-secondary)', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Evening cash count</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Evening cash count (Closing)</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '0.25rem' }}>
                   {eveningCash !== null ? formatCurrency(eveningCash) : <span style={{ color: 'var(--warning)', fontSize: '1rem' }}>Pending</span>}
                 </div>
+                {eveningCashData?.created_at && (
+                  <div style={{ fontSize: '0.775rem', color: '#81c784', marginTop: '0.35rem' }}>
+                    🕒 Counted at {formatDateTime(eveningCashData.created_at)}
+                    {eveningCashData.staff_members?.name ? ` by ${eveningCashData.staff_members.name}` : ''}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -249,7 +430,7 @@ export default function EODReportPage() {
                   </div>
                   {cashTransactions.filter(t => t.tx_type === 'expense').length > 0 && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                      {cashTransactions.filter(t => t.tx_type === 'expense').map(t => `${t.category}: ₹${t.amount}`).join(', ')}
+                      {cashTransactions.filter(t => t.tx_type === 'expense').map(t => `${t.category}: ₹${t.amount} (${formatTime(t.created_at)})`).join(', ')}
                     </div>
                   )}
                 </div>
@@ -261,7 +442,7 @@ export default function EODReportPage() {
                   </div>
                   {cashTransactions.filter(t => t.tx_type === 'bank_deposit').length > 0 && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                      {cashTransactions.filter(t => t.tx_type === 'bank_deposit').map(t => `${t.category}: ₹${t.amount}`).join(', ')}
+                      {cashTransactions.filter(t => t.tx_type === 'bank_deposit').map(t => `${t.category}: ₹${t.amount} (${formatTime(t.created_at)})`).join(', ')}
                     </div>
                   )}
                 </div>
@@ -292,7 +473,6 @@ export default function EODReportPage() {
                 </>
               )}
             </div>
-            <div style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>Wastage entries: {wastageCount}</div>
           </div>
 
           {/* Section 3 (Baskin Robbins): ice cream per flavour */}
@@ -355,41 +535,44 @@ export default function EODReportPage() {
             );
           })()}
 
-          {/* Section 3: Stock Variance & Audit Highlights */}
-          {!brRows && <div className={styles.card}>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Short</h3>
-            {stockError ? (
-              <div style={{ color: 'var(--danger)' }}>Could not check stock: {stockError}</div>
-            ) : varianceAlerts.length === 0 ? (
-              <div style={{ color: stockNote ? 'var(--text-secondary)' : 'var(--success)' }}>
-                {stockNote || `✓ Nothing short on ${selectedDate}.`}
-              </div>) : (
-              <>
-              {stockNote && <p style={{ color: 'var(--text-secondary)' }}>{stockNote}</p>}
-              <table className={styles.table}>
-                <thead>
-                  <tr><th>Item</th><th>Expected</th><th>Counted</th><th>Difference</th><th>₹</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {varianceAlerts.map(r => {
-                    const u = displayUnit(r.rista_unit, r.uom);
-                    const d = (q: number) => toDisplay(Number(q), r.rista_unit, r.uom);
-                    return (
-                      <tr key={r.item_id} style={{ background: 'rgba(255,23,68,0.08)' }}>
-                        <td style={{ fontWeight: 600 }}>{r.item_name}</td>
-                        <td>{d(r.system_closing)} {u}</td>
-                        <td>{d(r.actual_closing)} {u}</td>
-                        <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{signed(d(r.variance))} {u}</td>
-                        <td style={{ fontWeight: 700 }}>{r.rate ? `₹${Math.round(Number(r.variance_amount)).toLocaleString('en-IN')}` : '—'}</td>
-                        <td><span className={styles.badgeDanger}>{r.status === 'CHECK_RECEIVED' ? '⚠ Delivery not entered?' : '⚠ Short'}</span></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              </>
-            )}
-          </div>}
+          {/* Section 3: Stock Variance & Audit Highlights (Non-BR stores) */}
+          {!brRows && (
+            <div className={styles.card}>
+              <h3 style={{ margin: '0 0 1rem 0', color: 'var(--accent-primary)' }}>3. Stock Short</h3>
+              {stockError ? (
+                <div style={{ color: 'var(--danger)' }}>Could not check stock: {stockError}</div>
+              ) : varianceAlerts.length === 0 ? (
+                <div style={{ color: stockNote ? 'var(--text-secondary)' : 'var(--success)' }}>
+                  {stockNote || `✓ Nothing short on ${selectedDate}.`}
+                </div>
+              ) : (
+                <>
+                  {stockNote && <p style={{ color: 'var(--text-secondary)' }}>{stockNote}</p>}
+                  <table className={styles.table}>
+                    <thead>
+                      <tr><th>Item</th><th>Expected</th><th>Counted</th><th>Difference</th><th>₹</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {varianceAlerts.map(r => {
+                        const u = displayUnit(r.rista_unit, r.uom);
+                        const d = (q: number) => toDisplay(Number(q), r.rista_unit, r.uom);
+                        return (
+                          <tr key={r.item_id} style={{ background: 'rgba(255,23,68,0.08)' }}>
+                            <td style={{ fontWeight: 600 }}>{r.item_name}</td>
+                            <td>{d(r.system_closing)} {u}</td>
+                            <td>{d(r.actual_closing)} {u}</td>
+                            <td style={{ color: 'var(--danger)', fontWeight: 700 }}>{signed(d(r.variance))} {u}</td>
+                            <td style={{ fontWeight: 700 }}>{r.rate ? `₹${Math.round(Number(r.variance_amount)).toLocaleString('en-IN')}` : '—'}</td>
+                            <td><span className={styles.badgeDanger}>{r.status === 'CHECK_RECEIVED' ? '⚠ Delivery not entered?' : '⚠ Short'}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

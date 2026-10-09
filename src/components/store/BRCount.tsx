@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import styles from '@/app/(dashboard)/store/store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate, addDays } from '@/lib/dates';
+import { istDate, addDays, formatTime, formatDateTime } from '@/lib/dates';
 import { BoxEntry, boxEntryEmpty, boxNet, EMPTY_BOX_GRAMS, FULL_BOX_GRAMS } from '@/lib/icecream';
 import { Session, grams } from '@/lib/br';
 import { StockTabs } from '@/components/store/StockTabs';
@@ -40,6 +40,8 @@ export function BRCount() {
 
   const today = istDate();
 
+  const [lastSavedTimes, setLastSavedTimes] = useState<Record<Session, string | null>>({ opening: null, closing: null });
+
   const load = useCallback(async () => {
     if (!store) return;
     setLoading(true);
@@ -49,7 +51,7 @@ export function BRCount() {
         .select('id, name, tare_grams, full_box_grams, item_categories!inner(brand_id, is_flavour, name, sort_order)')
         .eq('is_active', true).eq('item_categories.brand_id', store.brand_id).eq('item_categories.is_flavour', true)
         .order('name'),
-      supabase.from('br_flavour_counts').select('item_id, count_date, session, unopened_boxes, open_box_gross, grams, staff_member_id')
+      supabase.from('br_flavour_counts').select('item_id, count_date, session, unopened_boxes, open_box_gross, grams, staff_member_id, created_at, updated_at')
         .eq('store_id', store.id).gte('count_date', addDays(today, -1)).lte('count_date', today),
     ]);
     const list = ((rows || []) as unknown as Flavour[])
@@ -57,6 +59,7 @@ export function BRCount() {
       .sort((a, b) => a.item_categories.sort_order - b.item_categories.sort_order || a.name.localeCompare(b.name));
     const e: Record<Session, Record<string, BoxEntry>> = { opening: {}, closing: {} };
     const s: Record<Session, Set<string>> = { opening: new Set(), closing: new Set() };
+    const times: Record<Session, string | null> = { opening: null, closing: null };
     const ln: Record<string, number> = {};
     const lnB: Record<string, BoxEntry> = {};
     let savedStaff = '';
@@ -65,6 +68,10 @@ export function BRCount() {
         const ses = c.session as Session;
         e[ses][c.item_id] = { unopened: String(c.unopened_boxes ?? 0), openGross: Number(c.open_box_gross) > 0 ? String(c.open_box_gross) : '' };
         s[ses].add(c.item_id);
+        const t = c.updated_at || c.created_at;
+        if (t && (!times[ses] || t > (times[ses] as string))) {
+          times[ses] = t;
+        }
         if (c.staff_member_id && !savedStaff) savedStaff = c.staff_member_id;
       } else if (c.session === 'closing') {
         ln[c.item_id] = Number(c.grams);
@@ -80,6 +87,7 @@ export function BRCount() {
       closing: { ...e.closing, ...prev.closing },
     }));
     setSaved(s);
+    setLastSavedTimes(times);
     setLastNight(ln);
     setLastNightBoxes(lnB);
     // Open the tab that still needs doing only on first load
@@ -314,10 +322,21 @@ export function BRCount() {
       <div className={styles.tabs}>
         {(['opening', 'closing'] as Session[]).map(s => (
           <button key={s} className={`${styles.tab} ${session === s ? styles.active : ''}`} onClick={() => setSession(s)}>
-            {s === 'opening' ? '🌅 Opening' : '🌙 Closing'} {saved[s].size >= flavours.length && flavours.length ? '✓' : `(${saved[s].size}/${flavours.length})`}
+            <span>{s === 'opening' ? '🌅 Opening' : '🌙 Closing'} {saved[s].size >= flavours.length && flavours.length ? '✓' : `(${saved[s].size}/${flavours.length})`}</span>
+            {lastSavedTimes[s] && (
+              <span style={{ fontSize: '0.72rem', opacity: 0.85, fontWeight: 400, marginTop: '0.15rem' }}>
+                🕒 {formatTime(lastSavedTimes[s])}
+              </span>
+            )}
           </button>
         ))}
       </div>
+
+      {lastSavedTimes[session] && (
+        <div style={{ padding: '0.6rem 0.9rem', background: 'rgba(0,200,83,0.06)', border: '1px solid rgba(0,200,83,0.2)', borderRadius: '8px', marginBottom: '0.75rem', fontSize: '0.825rem', color: '#81c784', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          🕒 <strong>{session === 'opening' ? 'Opening' : 'Closing'} weigh recorded at {formatDateTime(lastSavedTimes[session])}</strong>
+        </div>
+      )}
 
       <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,200,83,0.08)', border: '1px solid rgba(0,200,83,0.25)', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.88rem' }}>
         ⚡ <strong>Auto-save active:</strong> Each flavour automatically saves to the cloud as soon as you type or tap outside the box.

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import styles from '../store.module.css';
 import { DENOMINATIONS, DailyCashTransaction } from '@/lib/types';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate } from '@/lib/dates';
+import { istDate, formatDateTime, formatTime } from '@/lib/dates';
 
 type StaffMember = { id: string; name: string };
 
@@ -50,6 +50,7 @@ export default function CashTallyPage() {
   // Morning count & POS cash for live evening reconciliation
   const [morningTotal, setMorningTotal] = useState<number | null>(null);
   const [posCashSales, setPosCashSales] = useState<number | null>(null);
+  const [savedTallyInfo, setSavedTallyInfo] = useState<{ time: string; amount: number; staffId: string } | null>(null);
 
   const today = istDate();
 
@@ -81,12 +82,18 @@ export default function CashTallyPage() {
 
     if (tally) {
       setHasSavedTally(true);
+      setSavedTallyInfo({
+        time: tally.created_at,
+        amount: Number(tally.total_amount),
+        staffId: tally.staff_member_id || '',
+      });
       setSelectedStaff(tally.staff_member_id || '');
       const c: Record<string, number> = {};
       NOTES.forEach(d => { c[d.key] = tally[d.key] || 0; });
       setCounts(c);
     } else {
       setHasSavedTally(false);
+      setSavedTallyInfo(null);
       setCounts({});
       setSelectedStaff('');
     }
@@ -236,12 +243,18 @@ export default function CashTallyPage() {
         </button>
       </div>
 
-      {isLockedForStore && (
-        <div style={{ maxWidth: '640px', margin: '0 auto 1.5rem', padding: '1rem', background: 'rgba(255,214,0,0.1)', border: '1px solid var(--warning)', borderRadius: '8px', textAlign: 'center' }}>
-          🔒 <strong>{mode === 'morning' ? 'Morning' : 'Evening'} cash has been submitted and locked.</strong>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-            Store staff cannot edit a saved cash count. If an adjustment is needed, contact an Admin or Super Admin.
+      {hasSavedTally && savedTallyInfo && (
+        <div style={{ maxWidth: '640px', margin: '0 auto 1.5rem', padding: '0.85rem 1rem', background: 'rgba(0,200,83,0.08)', border: '1px solid rgba(0,200,83,0.3)', borderRadius: '10px', textAlign: 'center' }}>
+          ✅ <strong>{mode === 'morning' ? 'Morning' : 'Evening'} cash counted and saved on {formatDateTime(savedTallyInfo.time)}</strong>
+          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--success)', marginTop: '0.2rem' }}>
+            Counted Drawer Amount: ₹{savedTallyInfo.amount.toLocaleString('en-IN')}
+            {staffList.find(s => s.id === savedTallyInfo.staffId)?.name ? ` · by ${staffList.find(s => s.id === savedTallyInfo.staffId)?.name}` : ''}
           </div>
+          {isLockedForStore && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+              🔒 Locked for store editing. If an adjustment is needed, contact an Admin or Super Admin.
+            </div>
+          )}
         </div>
       )}
 
@@ -449,7 +462,9 @@ export default function CashTallyPage() {
                   </span>
                   <strong style={{ fontSize: '0.9rem' }}>{t.category}</strong>
                   {t.description && <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>— {t.description}</span>}
-                  {t.staff_member?.name && <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block' }}>by {t.staff_member.name}</span>}
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginTop: '0.15rem' }}>
+                    🕒 {formatTime(t.created_at)} {t.staff_member?.name ? `· by ${t.staff_member.name}` : ''}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <span style={{ fontWeight: 700, fontSize: '0.95rem', color: t.tx_type === 'expense' ? 'var(--danger)' : 'var(--accent-primary)' }}>
