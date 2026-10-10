@@ -53,3 +53,115 @@ export function toReportRows(data: unknown): BRReportRow[] {
     received: Number(r.received), sold: Number(r.sold), wasted: Number(r.wasted), allowance: Number(r.allowance),
   }));
 }
+
+/**
+ * Self-healing repair for post-midnight closing counts that were previously saved
+ * one day too early due to double-subtracting businessDate().
+ * E.g. weighed at 3:00 AM on 11 Oct (shift date = 10 Oct), accidentally saved under 9 Oct.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function repairLateNightBRCounts(supabase: any, storeId: string): Promise<boolean> {
+  try {
+    const { businessDate, addDays, isLateNightShift } = await import('@/lib/dates');
+    const cutoffDate = addDays(businessDate(), -5);
+    const { data: rows } = await supabase
+      .from('br_flavour_counts')
+      .select('id, store_id, item_id, count_date, session, unopened_boxes, open_box_gross, grams, staff_member_id, submitted_by_profile_id, created_at, updated_at')
+      .eq('store_id', storeId)
+      .gte('count_date', cutoffDate);
+
+    if (!rows || !rows.length) return false;
+
+    type CountRow = {
+      id: string; store_id: string; item_id: string; count_date: string; session: Session;
+      unopened_boxes: number; open_box_gross: number; grams: number;
+      staff_member_id: string | null; submitted_by_profile_id: string | null;
+      created_at: string; updated_at: string;
+    };
+
+    const typedRows = rows as CountRow[];
+    const existingClosingByDateItem = new Set(
+      typedRows.filter(r => r.session === 'closing').map(r => `${r.count_date}:${r.item_id}`)
+    );
+    const openingByDateItem = new Map<string, CountRow>();
+    typedRows.filter(r => r.session === 'opening').forEach(r => {
+      openingByDateItem.set(`${r.count_date}:${r.item_id}`, r);
+    });
+
+    const toUpsert: Array<Record<string, unknown>> = [];
+    const toRestoreOnPrevDay: Array<Record<string, unknown>> = [];
+    const idsToDelete: string[] = [];
+
+    for (const r of typedRows) {
+      if (r.session !== 'closing') continue;
+      const ts = r.updated_at || r.created_at;
+      if (!ts) continue;
+      const dt = new Date(ts);
+      if (isNaN(dt.getTime()) || !isLateNightShift(dt)) continue;
+
+      // True operating shift date for this post-midnight timestamp
+      const trueShiftDate = businessDate(dt);
+      // If it was saved one day earlier than the true shift date (double-subtraction bug)
+      if (r.count_date === addDays(trueShiftDate, -1) && !existingClosingByDateItem.has(`${trueShiftDate}:${r.item_id}`)) {
+        toUpsert.push({
+          store_id: r.store_id,
+          item_id: r.item_id,
+          count_date: trueShiftDate,
+          session: 'closing',
+          unopened_boxes: Number(r.unopened_boxes) || 0,
+          open_box_gross: Number(r.open_box_gross) || 0,
+          grams: Number(r.grams) || 0,
+          staff_member_id: r.staff_member_id,
+          submitted_by_profile_id: r.submitted_by_profile_id,
+          updated_at: ts,
+        });
+
+        // If the row was originally created on that earlier day and overwritten tonight,
+        // restore it from trueShiftDate's opening count if available; otherwise if created tonight, remove the stray duplicate.
+        const createdShift = r.created_at ? businessDate(new Date(r.created_at)) : trueShiftDate;
+        const nextOpening = openingByDateItem.get(`${trueShiftDate}:${r.item_id}`);
+        if (createdShift === r.count_date && nextOpening) {
+          toRestoreOnPrevDay.push({
+            store_id: r.store_id,
+            item_id: r.item_id,
+            count_date: r.count_date,
+            session: 'closing',
+            unopened_boxes: Number(nextOpening.unopened_boxes) || 0,
+            open_box_gross: Number(nextOpening.open_box_gross) || 0,
+            grams: Number(nextOpening.grams) || 0,
+            staff_member_id: nextOpening.staff_member_id || r.staff_member_id,
+            submitted_by_profile_id: nextOpening.submitted_by_profile_id || r.submitted_by_profile_id,
+            updated_at: r.created_at,
+          });
+        } else if (createdShift === trueShiftDate) {
+          idsToDelete.push(r.id);
+        }
+      }
+    }
+
+    if (toUpsert.length === 0) return false;
+
+    const { error } = await supabase
+      .from('br_flavour_counts')
+      .upsert(toUpsert, { onConflict: 'store_id,item_id,count_date,session' });
+
+    if (error) {
+      console.warn('Could not auto-repair late-night BR counts:', error.message);
+      return false;
+    }
+
+    if (toRestoreOnPrevDay.length > 0) {
+      await supabase
+        .from('br_flavour_counts')
+        .upsert(toRestoreOnPrevDay, { onConflict: 'store_id,item_id,count_date,session' });
+    }
+    if (idsToDelete.length > 0) {
+      await supabase.from('br_flavour_counts').delete().in('id', idsToDelete);
+    }
+
+    return true;
+  } catch (e) {
+    console.warn('repairLateNightBRCounts error:', e);
+    return false;
+  }
+}

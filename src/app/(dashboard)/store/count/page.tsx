@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import styles from '../store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate, addDays } from '@/lib/dates';
+import { istDate, addDays, displayDate, isLateNightShift } from '@/lib/dates';
 import { Frequency, FREQUENCY_LABEL, isDue } from '@/lib/stock/schedule';
 import { displayUnit, fromDisplay, toDisplay } from '@/lib/stock/units';
 import { BoxEntry, boxEntryEmpty, boxNet, EMPTY_BOX_GRAMS } from '@/lib/icecream';
@@ -46,6 +46,7 @@ function GeneralCount() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const today = istDate();
+  const isLateNight = isLateNightShift();
 
   const load = useCallback(async () => {
     if (!store) return;
@@ -182,7 +183,14 @@ function GeneralCount() {
       <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className={styles.title}>Stock</h1>
-          <p className={styles.subtitle}>Count at closing. Enter what is <strong>actually there</strong> — open + unopened packs together.</p>
+          <p className={styles.subtitle}>
+            Count at closing · Active Sales Day: <strong>{displayDate(today)}</strong>. Enter what is <strong>actually there</strong> — open + unopened packs together.
+            {isLateNight && (
+              <span style={{ display: 'block', color: 'var(--warning)', marginTop: '0.25rem', fontWeight: 500 }}>
+                🌙 Post-midnight closing shift: Recording counts for {displayDate(today)} ({today})
+              </span>
+            )}
+          </p>
         </div>
         <Link href="/store" className={styles.backLink}>← Back</Link>
       </header>

@@ -3,18 +3,44 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { istDate, addDays } from '@/lib/dates';
+import { istDate, addDays, displayDate, shortDate, formatDateTime, isLateNightShift } from '@/lib/dates';
 import { Frequency, isDue } from '@/lib/stock/schedule';
 import styles from './super-admin.module.css';
-import { BR_BRAND_ID } from '@/lib/br';
+import { BR_BRAND_ID, grams, repairLateNightBRCounts } from '@/lib/br';
 
 type StoreRow = {
-  id: string; name: string; brand: string; is_active: boolean;
-  cash: string; due: number; counted: number;
-  salesUploaded: boolean; usageUploaded: boolean;
-  short: number; excess: number; problems: number;
-  yesterdaySales: number | null;
-  br?: { flavours: number; opened: number; closed: number; itemsUploaded: boolean; over: number; checked: boolean; totalKg?: number };
+  id: string;
+  name: string;
+  brand: string;
+  is_active: boolean;
+  morningCash: number | null;
+  morningCashTime: string | null;
+  eveningCash: number | null;
+  eveningCashTime: string | null;
+  due: number;
+  counted: number;
+  countedTime: string | null;
+  prevCountDate: string | null;
+  salesUploaded: boolean;
+  salesTime: string | null;
+  netSales: number | null;
+  usageUploaded: boolean;
+  usageTime: string | null;
+  short: number;
+  excess: number;
+  problems: number;
+  br?: {
+    flavours: number;
+    opened: number;
+    openedTime: string | null;
+    closed: number;
+    closedTime: string | null;
+    itemsUploaded: boolean;
+    over: number;
+    shortageGrams: number;
+    checked: boolean;
+    totalKg?: number;
+  };
 };
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
@@ -29,8 +55,10 @@ export default function AllStoresPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  const today = istDate();
-  const yesterday = addDays(today, -1);
+  const activeShiftDate = istDate();
+  const prevShiftDate = addDays(activeShiftDate, -1);
+  const [selectedDate, setSelectedDate] = useState<string>(activeShiftDate);
+  const isLateNight = isLateNightShift();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,62 +68,136 @@ export default function AllStoresPage() {
       setIsSuperAdmin(prof?.role === 'super_admin');
     }
 
-    // Fetch all stores to allow pilot management
     const { data: stores } = await supabase.from('stores').select('id, name, brand_id, is_active, brands(name)').order('name');
     const out = await Promise.all((stores || []).map(async st => {
-      const [{ data: cash }, { data: sales }, { data: usage }, { data: items }, { data: counts }, { data: report }] = await Promise.all([
-        supabase.from('daily_cash_tally').select('tally_type').eq('store_id', st.id).eq('entry_date', today),
-        supabase.from('daily_sales_summary').select('net_sales, has_summary, has_items').eq('store_id', st.id).eq('entry_date', yesterday).maybeSingle(),
-        supabase.from('rista_consumption_uploads').select('id').eq('store_id', st.id).lte('date_from', yesterday).gte('date_to', yesterday).limit(1),
+      if (st.brand_id === BR_BRAND_ID) {
+        await repairLateNightBRCounts(supabase, st.id);
+      }
+
+      const [
+        { data: cash },
+        { data: sales },
+        { data: usage },
+        { data: items },
+        { data: counts },
+        { data: report },
+      ] = await Promise.all([
+        supabase.from('daily_cash_tally').select('tally_type, total_amount, created_at').eq('store_id', st.id).eq('entry_date', selectedDate),
+        supabase.from('daily_sales_summary').select('net_sales, has_summary, has_items, created_at').eq('store_id', st.id).eq('entry_date', selectedDate).maybeSingle(),
+        supabase.from('rista_consumption_uploads').select('id, created_at').eq('store_id', st.id).lte('date_from', selectedDate).gte('date_to', selectedDate).order('created_at', { ascending: false }).limit(1),
         supabase.from('items').select('id, count_frequency, item_categories!inner(brand_id)')
           .eq('is_active', true).eq('item_categories.brand_id', st.brand_id).neq('count_frequency', 'none'),
-        supabase.from('stock_counts').select('item_id, count_date').eq('store_id', st.id)
-          .gte('count_date', addDays(today, -62)).order('count_date', { ascending: false }).limit(5000),
-        supabase.rpc('stock_variance_report', { p_store_id: st.id, p_from: null, p_to: today }),
+        supabase.from('stock_counts').select('item_id, count_date, created_at, updated_at').eq('store_id', st.id)
+          .lte('count_date', selectedDate).gte('count_date', addDays(selectedDate, -62)).order('count_date', { ascending: false }).limit(5000),
+        supabase.rpc('stock_variance_report', { p_store_id: st.id, p_from: null, p_to: selectedDate }),
       ]);
+
       let br: StoreRow['br'];
       if (st.brand_id === BR_BRAND_ID) {
-        const [{ data: todaySales }, { data: repToday }, { data: repYest }, { data: weighed }] = await Promise.all([
-          supabase.from('daily_sales_summary').select('net_sales, has_summary, has_items').eq('store_id', st.id).eq('entry_date', today).maybeSingle(),
-          supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: today }),
-          supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: yesterday }),
-          supabase.from('br_flavour_counts').select('session, grams').eq('store_id', st.id).eq('count_date', today),
+        const [{ data: repDay }, { data: weighed }] = await Promise.all([
+          supabase.rpc('br_daily_report', { p_store_id: st.id, p_date: selectedDate }),
+          supabase.from('br_flavour_counts').select('session, grams, created_at, updated_at').eq('store_id', st.id).eq('count_date', selectedDate),
         ]);
-        const hasTodaySales = Boolean(todaySales?.has_items);
-        const rep = (hasTodaySales && (repToday || []).length ? repToday : repYest || []) as { status: string }[];
-        const todayGrams = (weighed || []).reduce((sum, w) => sum + Number((w as unknown as { grams: number }).grams || 0), 0);
+
+        const rep = (repDay || []) as {
+          opening: number | null;
+          closing: number | null;
+          sold: number;
+          gap: number | null;
+          allowance: number;
+          status: string;
+        }[];
+
+        const openWeighed = (weighed || []).filter(w => w.session === 'opening');
+        const closeWeighed = (weighed || []).filter(w => w.session === 'closing');
+
+        const latestOpenIso = openWeighed.reduce<string | null>((latest, w) => {
+          const t = w.updated_at || w.created_at;
+          return !latest || (t && t > latest) ? t : latest;
+        }, null);
+
+        const latestCloseIso = closeWeighed.reduce<string | null>((latest, w) => {
+          const t = w.updated_at || w.created_at;
+          return !latest || (t && t > latest) ? t : latest;
+        }, null);
+
+        const closingGrams = closeWeighed.reduce((sum, w) => sum + Number(w.grams || 0), 0);
+        const openingGrams = openWeighed.reduce((sum, w) => sum + Number(w.grams || 0), 0);
+        const activeGrams = closingGrams > 0 ? closingGrams : openingGrams;
+
+        let overCount = 0;
+        let totalShortageGrams = 0;
+        rep.forEach(r => {
+          const isCounted = r.opening !== null && r.closing !== null;
+          const allow = Number(r.allowance) > 0 ? Number(r.allowance) : Math.round(Number(r.sold || 0) * 0.05);
+          const gap = Number(r.gap || 0);
+          const netShortage = gap - allow;
+          if (isCounted && netShortage >= 50) {
+            overCount += 1;
+            totalShortageGrams += netShortage;
+          }
+        });
+
         br = {
           flavours: rep.length,
-          opened: (weighed || []).filter(w => w.session === 'opening').length,
-          closed: (weighed || []).filter(w => w.session === 'closing').length,
-          itemsUploaded: hasTodaySales || Boolean(sales?.has_items),
-          over: rep.filter(x => x.status === 'OVER').length,
-          checked: rep.some(x => ['OVER', 'OK', 'CHECK'].includes(x.status)),
-          totalKg: todayGrams > 0 ? Math.round(todayGrams / 1000) : undefined,
+          opened: openWeighed.length,
+          openedTime: latestOpenIso ? formatDateTime(latestOpenIso) : null,
+          closed: closeWeighed.length,
+          closedTime: latestCloseIso ? formatDateTime(latestCloseIso) : null,
+          itemsUploaded: Boolean(sales?.has_items),
+          over: overCount,
+          shortageGrams: totalShortageGrams,
+          checked: Boolean(sales?.has_items) && rep.some(x => x.opening !== null && x.closing !== null),
+          totalKg: activeGrams > 0 ? Math.round(activeGrams / 1000) : undefined,
         };
       }
+
       const last: Record<string, string> = {};
-      (counts || []).forEach(c => { if (!last[c.item_id]) last[c.item_id] = c.count_date; });
-      const due = (items || []).filter(i => isDue(i.count_frequency as Frequency, last[i.id] || null, today));
+      let latestCountIso: string | null = null;
+      let prevDate: string | null = null;
+      (counts || []).forEach(c => {
+        if (!last[c.item_id]) last[c.item_id] = c.count_date;
+        if (c.count_date === selectedDate) {
+          const t = c.updated_at || c.created_at;
+          if (t && (!latestCountIso || t > latestCountIso)) latestCountIso = t;
+        } else if (!prevDate || c.count_date > prevDate) {
+          prevDate = c.count_date;
+        }
+      });
+
+      const due = (items || []).filter(i => isDue(i.count_frequency as Frequency, last[i.id] || null, selectedDate));
       const rep = (report || []) as { status: string; variance_amount: number }[];
-      const ok = rep.filter(r => RELIABLE.has(r.status));
-      const m = cash?.some(c => c.tally_type === 'morning'), e = cash?.some(c => c.tally_type === 'evening');
+      const okRows = rep.filter(r => RELIABLE.has(r.status));
+      const mCash = cash?.find(c => c.tally_type === 'morning');
+      const eCash = cash?.find(c => c.tally_type === 'evening');
+
       return {
-        id: st.id, name: st.name, brand: (st as unknown as { brands?: { name: string } }).brands?.name || '',
+        id: st.id,
+        name: st.name,
+        brand: (st as unknown as { brands?: { name: string } }).brands?.name || '',
         is_active: Boolean(st.is_active),
-        cash: m && e ? 'Both' : m ? 'Morning' : e ? 'Evening only' : 'Not yet',
-        due: due.length, counted: due.filter(i => last[i.id] === today).length,
-        salesUploaded: Boolean(sales && sales.has_summary !== false), usageUploaded: Boolean(usage?.length),
-        short: ok.filter(r => Number(r.variance_amount) < 0).reduce((t, r) => t + Number(r.variance_amount), 0),
-        excess: ok.filter(r => Number(r.variance_amount) > 0).reduce((t, r) => t + Number(r.variance_amount), 0),
+        morningCash: mCash ? Number(mCash.total_amount) : null,
+        morningCashTime: mCash?.created_at ? formatDateTime(mCash.created_at) : null,
+        eveningCash: eCash ? Number(eCash.total_amount) : null,
+        eveningCashTime: eCash?.created_at ? formatDateTime(eCash.created_at) : null,
+        due: due.length,
+        counted: due.filter(i => last[i.id] === selectedDate).length,
+        countedTime: latestCountIso ? formatDateTime(latestCountIso) : null,
+        prevCountDate: prevDate,
+        salesUploaded: Boolean(sales && sales.has_summary !== false),
+        salesTime: sales?.created_at ? formatDateTime(sales.created_at) : null,
+        netSales: sales && sales.has_summary !== false ? Number(sales.net_sales) : null,
+        usageUploaded: Boolean(usage?.length),
+        usageTime: usage?.[0]?.created_at ? formatDateTime(usage[0].created_at) : null,
+        short: okRows.filter(r => Number(r.variance_amount) < 0).reduce((t, r) => t + Number(r.variance_amount), 0),
+        excess: okRows.filter(r => Number(r.variance_amount) > 0).reduce((t, r) => t + Number(r.variance_amount), 0),
         problems: rep.filter(r => r.status === 'CHECK_RECEIVED').length,
-        yesterdaySales: sales && sales.has_summary !== false ? Number(sales.net_sales) : null,
         br,
       } as StoreRow;
     }));
     setRows(out);
     setLoading(false);
-  }, [supabase, today, yesterday]);
+  }, [supabase, selectedDate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -115,17 +217,24 @@ export default function AllStoresPage() {
   const activeStores = rows.filter(r => r.is_active);
   const visibleRows = showInactive ? rows : activeStores;
 
-  const totalSales = visibleRows.reduce((t, r) => t + (r.yesterdaySales || 0), 0);
+  const totalSales = visibleRows.reduce((t, r) => t + (r.netSales || 0), 0);
   const totalShort = visibleRows.reduce((t, r) => t + (r.br ? 0 : r.short), 0);
   const ok = (b: boolean) => <span className={b ? styles.badgeSuccess : styles.badgeDefault}>{b ? '✓' : 'Pending'}</span>;
+
+  const selectStoreInStorage = (storeId: string) => {
+    try {
+      localStorage.setItem('selectedStore', storeId);
+      window.dispatchEvent(new Event('storeChange'));
+    } catch { /* ignore */ }
+  };
 
   return (
     <div className={styles.container}>
       <div className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 className={styles.title}>All Stores</h1>
+          <h1 className={styles.title}>All Stores — Shift Overview</h1>
           <p className={styles.subtitle}>
-            Showing {activeStores.length} active store{activeStores.length === 1 ? '' : 's'} in pilot. Switch stores on or off as you expand.
+            Every store&apos;s Opening, Closing (including post-midnight 12 AM – 6 AM entries), Cash, and Rista Sales matched to the same <strong>Sales Day</strong>.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -145,6 +254,65 @@ export default function AllStoresPage() {
             />
             Show paused stores
           </label>
+        </div>
+      </div>
+
+      {/* Unified Sales Day / Shift Date Navigation Bar */}
+      <div className={styles.card} style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <div style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', fontWeight: 600 }}>
+            Selected Sales Day (Operating Shift Date)
+          </div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <span>📅 {displayDate(selectedDate)}</span>
+            {selectedDate === activeShiftDate && isLateNight && (
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, padding: '0.2rem 0.6rem', borderRadius: '6px', background: 'rgba(255,214,0,0.12)', color: 'var(--warning)', border: '1px solid rgba(255,214,0,0.3)' }}>
+                🌙 Post-midnight closing active (12 AM – 6 AM entries record here)
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={selectedDate === prevShiftDate ? styles.primaryButton : styles.secondaryButton}
+            onClick={() => setSelectedDate(prevShiftDate)}
+          >
+            ⏮️ Yesterday ({shortDate(prevShiftDate)})
+          </button>
+          <button
+            type="button"
+            className={selectedDate === activeShiftDate ? styles.primaryButton : styles.secondaryButton}
+            onClick={() => setSelectedDate(activeShiftDate)}
+          >
+            📅 Active Shift ({shortDate(activeShiftDate)})
+          </button>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => setSelectedDate(d => addDays(d, -1))}
+            title="Previous day"
+          >
+            ‹
+          </button>
+          <input
+            type="date"
+            className={styles.searchInput}
+            style={{ width: 'auto' }}
+            value={selectedDate}
+            max={activeShiftDate}
+            onChange={e => e.target.value && setSelectedDate(e.target.value)}
+          />
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => setSelectedDate(d => addDays(d, 1))}
+            disabled={selectedDate >= activeShiftDate}
+            title="Next day"
+          >
+            ›
+          </button>
         </div>
       </div>
 
@@ -195,14 +363,27 @@ export default function AllStoresPage() {
         </div>
       )}
 
-      {loading ? <div className={styles.loading}>Loading stores…</div> : (
+      {loading ? <div className={styles.loading}>Loading stores for {displayDate(selectedDate)}…</div> : (
         <>
           <div className={styles.statGrid} style={{ marginBottom: '1.5rem' }}>
-            <div className={styles.statCard}><div className={styles.statLabel}>Yesterday&apos;s sales (uploaded)</div><div className={styles.statValue}>{inr(totalSales)}</div></div>
-            <div className={styles.statCard}><div className={styles.statLabel}>Short at latest counts</div>
-              <div className={styles.statValue} style={{ color: totalShort < 0 ? 'var(--danger)' : undefined }}>{inr(totalShort)}</div></div>
-            <div className={styles.statCard}><div className={styles.statLabel}>Stores with stock counted tonight</div>
-              <div className={styles.statValue}>{visibleRows.filter(r => r.br ? r.br.flavours > 0 && r.br.closed >= r.br.flavours : r.due > 0 && r.counted >= r.due).length} / {visibleRows.length}</div></div>
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Net Sales ({shortDate(selectedDate)})</div>
+              <div className={styles.statValue} style={{ color: totalSales > 0 ? 'var(--success)' : undefined }}>
+                {totalSales > 0 ? inr(totalSales) : 'Pending upload'}
+              </div>
+            </div>
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Closing Stock Completed ({shortDate(selectedDate)})</div>
+              <div className={styles.statValue}>
+                {visibleRows.filter(r => r.br ? r.br.flavours > 0 && r.br.closed >= r.br.flavours : r.due > 0 && r.counted >= r.due).length} / {visibleRows.length} stores
+              </div>
+            </div>
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>99 Pancakes Stock Short ({shortDate(selectedDate)})</div>
+              <div className={styles.statValue} style={{ color: totalShort < 0 ? 'var(--danger)' : undefined }}>
+                {inr(totalShort)}
+              </div>
+            </div>
           </div>
 
           <div className={styles.card} style={{ overflowX: 'auto' }}>
@@ -210,87 +391,165 @@ export default function AllStoresPage() {
               <thead>
                 <tr>
                   <th>Store</th>
-                  <th>Pilot Status</th>
-                  <th>Cash today</th>
-                  <th>Stock counted</th>
-                  <th>Yesterday&apos;s Rista files</th>
-                  <th>Short / Excess</th>
-                  <th></th>
+                  <th>🌅 Opening (Cash &amp; Stock)</th>
+                  <th>🌙 Closing (Cash &amp; Stock)</th>
+                  <th>📄 Rista Files ({shortDate(selectedDate)})</th>
+                  <th>⚖️ Variance / Shortage</th>
+                  <th>Quick View ({shortDate(selectedDate)})</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRows.map(r => (
                   <tr key={r.id} style={{ opacity: r.is_active ? 1 : 0.6 }}>
                     <td style={{ fontWeight: 600 }}>
-                      {r.name}
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{r.brand}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span>{r.br ? '🍨' : '🥞'} {r.name}</span>
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                        {r.brand} · {r.is_active ? '🟢 Active' : '⚪ Paused'}
+                      </div>
                     </td>
+
+                    {/* OPENING COLUMN */}
                     <td>
-                      {isSuperAdmin ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleStoreActive(r.id, r.is_active)}
-                          disabled={togglingId === r.id}
-                          style={{
-                            padding: '0.25rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer',
-                            background: r.is_active ? 'rgba(0,200,83,0.15)' : 'var(--bg-secondary)',
-                            color: r.is_active ? 'var(--success)' : 'var(--text-secondary)',
-                            border: r.is_active ? '1px solid var(--success)' : '1px solid var(--border-color)',
-                          }}
-                        >
-                          {togglingId === r.id ? '…' : r.is_active ? '🟢 Active' : '⚪ Paused'}
-                        </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem' }}>
+                        <div>
+                          💰 Cash: {r.morningCash !== null ? (
+                            <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                              {inr(r.morningCash)} <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 400 }}>({r.morningCashTime})</span>
+                            </span>
+                          ) : <span className={styles.badgeDefault}>Pending</span>}
+                        </div>
+                        {r.br ? (
+                          <div>
+                            🍨 Weigh: {r.br.opened >= r.br.flavours && r.br.flavours > 0 ? (
+                              <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                ✓ {r.br.opened}/{r.br.flavours} <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 400 }}>({r.br.openedTime})</span>
+                              </span>
+                            ) : (
+                              <span className={styles.badgeDefault}>
+                                {r.br.opened}/{r.br.flavours} {r.br.openedTime ? `(${r.br.openedTime})` : ''}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                            📦 Opening baseline: {r.prevCountDate ? `Prev close (${shortDate(r.prevCountDate)})` : 'First count'}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* CLOSING COLUMN */}
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.84rem' }}>
+                        <div>
+                          💰 Cash: {r.eveningCash !== null ? (
+                            <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                              {inr(r.eveningCash)} <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 400 }}>({r.eveningCashTime})</span>
+                            </span>
+                          ) : <span className={styles.badgeDefault}>Pending</span>}
+                        </div>
+                        {r.br ? (
+                          <div>
+                            🍨 Weigh: {r.br.closed >= r.br.flavours && r.br.flavours > 0 ? (
+                              <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                ✓ {r.br.closed}/{r.br.flavours} <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 400 }}>({r.br.closedTime})</span>
+                              </span>
+                            ) : (
+                              <span className={styles.badgeDefault}>
+                                {r.br.closed}/{r.br.flavours} {r.br.closedTime ? `(${r.br.closedTime})` : 'Pending'}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            📦 Stock: {r.due === 0 ? (
+                              <span className={styles.badgeDefault}>Nothing due</span>
+                            ) : r.counted >= r.due ? (
+                              <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                ✓ {r.counted}/{r.due} <span style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 400 }}>({r.countedTime})</span>
+                              </span>
+                            ) : (
+                              <span className={styles.badgeDefault}>
+                                {r.counted}/{r.due} {r.countedTime ? `(${r.countedTime})` : 'Pending'}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* RISTA FILES COLUMN (SAME SALES DAY) */}
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.84rem' }}>
+                        <div>
+                          Summary {ok(r.salesUploaded)}{' '}
+                          {r.netSales !== null && <strong style={{ color: 'var(--success)', marginLeft: '0.25rem' }}>{inr(r.netSales)}</strong>}
+                        </div>
+                        <div>
+                          {r.br ? (
+                            <>Sales By Items {ok(r.br.itemsUploaded)}</>
+                          ) : (
+                            <>Consumption Usage {ok(r.usageUploaded)}</>
+                          )}
+                        </div>
+                        {(r.salesTime || r.usageTime) && (
+                          <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+                            🕒 {r.salesTime || r.usageTime}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* VARIANCE COLUMN */}
+                    <td>
+                      {r.br ? (
+                        !r.br.checked ? (
+                          <span className={styles.badgeDefault}>Awaiting weigh &amp; sales</span>
+                        ) : r.br.over > 0 ? (
+                          <div>
+                            <span className={styles.badgeDanger}>
+                              ⚠ {grams(r.br.shortageGrams)} short ({r.br.over} flv)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className={styles.badgeSuccess}>✓ 0 g shortage</span>
+                        )
                       ) : (
-                        <span
-                          style={{
-                            padding: '0.25rem 0.6rem', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
-                            background: r.is_active ? 'rgba(0,200,83,0.15)' : 'var(--bg-secondary)',
-                            color: r.is_active ? 'var(--success)' : 'var(--text-secondary)',
-                            border: r.is_active ? '1px solid var(--success)' : '1px solid var(--border-color)',
-                          }}
-                        >
-                          {r.is_active ? '🟢 Active' : '⚪ Paused'}
-                        </span>
+                        <div>
+                          <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{inr(r.short)}</span>
+                          {' / '}
+                          <span style={{ color: 'var(--success)' }}>{inr(r.excess)}</span>
+                          {r.problems > 0 && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--warning)' }}>
+                              {r.problems} delivery not entered?
+                            </div>
+                          )}
+                        </div>
                       )}
                     </td>
-                    <td>{r.cash === 'Both' ? ok(true) : <span className={styles.badgeDefault}>{r.cash}</span>}</td>
-                    {r.br ? (
-                      <>
-                        <td>
-                          🍨 Open {r.br.opened >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.opened}/{r.br.flavours}</span>}
-                          {' '}Close {r.br.closed >= r.br.flavours && r.br.flavours ? ok(true) : <span className={styles.badgeDefault}>{r.br.closed}/{r.br.flavours}</span>}
-                          {r.br.totalKg ? <span style={{ fontSize: '0.82rem', color: 'var(--success)', fontWeight: 600, marginLeft: '0.4rem' }}>({r.br.totalKg} kg)</span> : ''}
-                        </td>
-                        <td>Sales {ok(r.salesUploaded)} &nbsp; Items {ok(r.br.itemsUploaded)}</td>
-                        <td>{!r.br.checked ? <span className={styles.badgeDefault}>Not checked</span>
-                          : r.br.over ? <span className={styles.badgeDanger}>{r.br.over} flavour{r.br.over > 1 ? 's' : ''} over yesterday</span>
-                          : ok(true)}</td>
-                      </>
-                    ) : (
-                    <>
-                    <td>{r.due === 0 ? <span className={styles.badgeDefault}>Nothing due</span>
-                      : r.counted >= r.due ? ok(true) : <span className={styles.badgeDefault}>{r.counted} / {r.due}</span>}</td>
-                    <td>Sales {ok(r.salesUploaded)} &nbsp; Usage {ok(r.usageUploaded)}</td>
+
+                    {/* QUICK ACTIONS */}
                     <td>
-                      <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{inr(r.short)}</span>
-                      {' / '}<span style={{ color: 'var(--success)' }}>{inr(r.excess)}</span>
-                      {r.problems > 0 && <div style={{ fontSize: '0.75rem', color: 'var(--warning)' }}>{r.problems} delivery not entered?</div>}
-                    </td>
-                    </>
-                    )}
-                    <td>
-                      <Link
-                        href="/super-admin/stock-report"
-                        className={styles.secondaryButton}
-                        onClick={() => {
-                          try {
-                            localStorage.setItem('selectedStore', r.id);
-                            window.dispatchEvent(new Event('storeChange'));
-                          } catch { /* ignore */ }
-                        }}
-                      >
-                        Stock report
-                      </Link>
+                      <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <Link
+                          href={`/super-admin/stock-report?date=${selectedDate}`}
+                          className={styles.primaryButton}
+                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', textDecoration: 'none' }}
+                          onClick={() => selectStoreInStorage(r.id)}
+                        >
+                          📊 Stock Report
+                        </Link>
+                        <Link
+                          href={`/store/eod-report?date=${selectedDate}`}
+                          className={styles.secondaryButton}
+                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', textDecoration: 'none' }}
+                          onClick={() => selectStoreInStorage(r.id)}
+                        >
+                          🖨️ Day Summary
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -15,19 +15,22 @@ interface Profile {
 
 type NavLink = { href: string; label: string; icon: string; also?: string[] };
 
-// Store staff: four screens
+const daySummaryLink: NavLink = { href: '/store/eod-report', label: 'Day Summary', icon: '🖨️' };
+
+// Store staff screens
 const storeLinks: NavLink[] = [
   { href: '/store', label: 'Tonight', icon: '📋' },
   { href: '/store/cash-tally', label: 'Cash', icon: '💰' },
   { href: '/store/count', label: 'Stock', icon: '📦', also: ['/store/deliveries', '/store/wastage'] },
   { href: '/store/upload', label: 'Upload Rista Files', icon: '📄' },
+  daySummaryLink,
 ];
-const daySummaryLink: NavLink = { href: '/store/eod-report', label: 'Day Summary', icon: '🖨️' };
 
-// Owner: five screens
+// Owner / Admin overview screens
 const overviewLinks: NavLink[] = [
   { href: '/super-admin', label: 'All Stores', icon: '🏬' },
   { href: '/super-admin/stock-report', label: 'Stock Report', icon: '📊' },
+  daySummaryLink,
   { href: '/analytics/sales', label: 'Sales', icon: '💹', also: ['/analytics/trends'] },
 ];
 const itemsLink: NavLink = { href: '/super-admin/items', label: 'Items & Products', icon: '🧾', also: ['/super-admin/flavours'] };
@@ -37,15 +40,14 @@ function groupsForRole(role: Profile['role'], canEdit: boolean) {
   if (role === 'super_admin') {
     return [
       { group: 'Overview', links: overviewLinks },
-      { group: 'Store Work', links: storeLinks },
+      { group: 'Store Work', links: storeLinks.filter(l => l.href !== '/store/eod-report') },
       { group: 'Settings', links: [itemsLink, usersLink] },
     ];
   }
   if (role === 'admin') {
     return [
       { group: 'Overview', links: overviewLinks },
-      // View-only admins can read the Day Summary but not enter store data
-      { group: 'Store Work', links: canEdit ? storeLinks : [daySummaryLink] },
+      ...(canEdit ? [{ group: 'Store Work', links: storeLinks.filter(l => l.href !== '/store/eod-report') }] : []),
       { group: 'Settings', links: [itemsLink] },
     ];
   }

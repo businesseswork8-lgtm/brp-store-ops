@@ -4,9 +4,9 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import styles from '@/app/(dashboard)/store/store.module.css';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate, addDays, formatTime, formatDateTime } from '@/lib/dates';
+import { istDate, addDays, displayDate, isLateNightShift, formatTime, formatDateTime } from '@/lib/dates';
 import { BoxEntry, boxEntryEmpty, boxNet, EMPTY_BOX_GRAMS, FULL_BOX_GRAMS } from '@/lib/icecream';
-import { Session, grams } from '@/lib/br';
+import { Session, grams, repairLateNightBRCounts } from '@/lib/br';
 import { StockTabs } from '@/components/store/StockTabs';
 
 type Flavour = {
@@ -38,19 +38,16 @@ export function BRCount() {
   staffRef.current = staff;
   const hasInitializedSession = useRef(false);
 
-  // If weighing late at night / early morning (00:00 - 05:59 IST), the shift belongs to yesterday
-  const istHour = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hourCycle: 'h23' }).format(new Date()),
-    10
-  );
-  const isLateNight = istHour < 6;
-  const today = isLateNight ? addDays(istDate(), -1) : istDate();
+  // istDate() already honours the 6:00 AM IST late-night shift cutoff
+  const isLateNight = isLateNightShift();
+  const today = istDate();
 
   const [lastSavedTimes, setLastSavedTimes] = useState<Record<Session, string | null>>({ opening: null, closing: null });
 
   const load = useCallback(async () => {
     if (!store) return;
     setLoading(true);
+    await repairLateNightBRCounts(supabase, store.id);
     const [{ data: st }, { data: rows }, { data: counts }] = await Promise.all([
       supabase.from('staff_members').select('id, name').eq('store_id', store.id).eq('is_active', true).order('name'),
       supabase.from('items')
@@ -319,10 +316,10 @@ export function BRCount() {
         <div>
           <h1 className={styles.title}>Ice Cream Weigh</h1>
           <p className={styles.subtitle}>
-            Weigh <strong>every flavour</strong> at opening and again at closing.
+            Weigh <strong>every flavour</strong> at opening and again at closing · Active Sales Day: <strong>{displayDate(today)}</strong>
             {isLateNight && (
               <span style={{ display: 'block', color: 'var(--warning)', marginTop: '0.25rem', fontWeight: 500 }}>
-                🌙 Night shift mode: Recording closing counts for {today} shift
+                🌙 Post-midnight closing shift: Recording counts for {displayDate(today)} ({today})
               </span>
             )}
           </p>

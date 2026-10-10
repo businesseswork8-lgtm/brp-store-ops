@@ -3,10 +3,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate, addDays, displayDate, formatTime } from '@/lib/dates';
+import { istDate, addDays, displayDate, formatTime, isLateNightShift } from '@/lib/dates';
 import { Frequency, isDue } from '@/lib/stock/schedule';
 import styles from './store.module.css';
-import { isBRStore } from '@/lib/br';
+import { isBRStore, repairLateNightBRCounts } from '@/lib/br';
 
 type Step = {
   id: string;
@@ -41,6 +41,7 @@ export default function TonightPage() {
     usageUploadTime: null as string | null,
     due: 0,
     counted: 0,
+    countedTime: null as string | null,
     received: 0,
     latestDeliveryTime: null as string | null,
     wasted: 0,
@@ -59,15 +60,15 @@ export default function TonightPage() {
 
   const br = isBRStore(store);
   const today = istDate();
-  const yesterday = addDays(today, -1);
-
-  // Determine if it's late-night post-midnight closing hours (between 12:00 AM and 5:00 AM)
-  const currentHour = new Date().getHours();
-  const isLateNight = currentHour < 5;
+  const isLateNight = isLateNightShift();
 
   const load = useCallback(async () => {
     if (!store) return;
     setLoading(true);
+
+    if (isBRStore(store)) {
+      await repairLateNightBRCounts(supabase, store.id);
+    }
 
     const [
       { data: cash },
@@ -81,9 +82,9 @@ export default function TonightPage() {
       supabase.from('daily_cash_tally').select('tally_type, total_amount, created_at')
         .eq('store_id', store.id).eq('entry_date', today),
       supabase.from('daily_sales_summary').select('has_summary, net_sales, created_at')
-        .eq('store_id', store.id).eq('entry_date', yesterday).maybeSingle(),
+        .eq('store_id', store.id).eq('entry_date', today).maybeSingle(),
       supabase.from('rista_consumption_uploads').select('id, created_at')
-        .eq('store_id', store.id).lte('date_from', yesterday).gte('date_to', yesterday).order('created_at', { ascending: false }).limit(1),
+        .eq('store_id', store.id).lte('date_from', today).gte('date_to', today).order('created_at', { ascending: false }).limit(1),
       supabase.from('items').select('id, count_frequency, item_categories!inner(brand_id)')
         .eq('is_active', true).eq('item_categories.brand_id', store.brand_id).neq('count_frequency', 'none'),
       supabase.from('stock_counts').select('item_id, count_date, created_at, updated_at')
@@ -146,7 +147,16 @@ export default function TonightPage() {
     const eCash = cash?.find(c => c.tally_type === 'evening');
 
     const last: Record<string, string> = {};
-    (counts || []).forEach(c => { if (!last[c.item_id]) last[c.item_id] = c.count_date; });
+    let latestStockCountIso: string | null = null;
+    (counts || []).forEach(c => {
+      if (!last[c.item_id]) last[c.item_id] = c.count_date;
+      if (c.count_date === today) {
+        const t = c.updated_at || c.created_at;
+        if (t && (!latestStockCountIso || t > latestStockCountIso)) {
+          latestStockCountIso = t;
+        }
+      }
+    });
     const due = (items || []).filter(i => isDue(i.count_frequency as Frequency, last[i.id] || null, today));
 
     setS({
@@ -163,6 +173,7 @@ export default function TonightPage() {
       usageUploadTime: usage?.[0]?.created_at ? formatTime(usage[0].created_at) : null,
       due: due.length,
       counted: due.filter(i => last[i.id] === today).length,
+      countedTime: latestStockCountIso ? formatTime(latestStockCountIso) : null,
       received: rec?.length || 0,
       latestDeliveryTime: rec?.[0]?.created_at ? formatTime(rec[0].created_at) : null,
       wasted: wst?.length || 0,
@@ -170,7 +181,7 @@ export default function TonightPage() {
       ...brx,
     });
     setLoading(false);
-  }, [supabase, store, today, yesterday]);
+  }, [supabase, store, today]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -271,28 +282,31 @@ export default function TonightPage() {
       time: s.morningCashTime,
     },
     {
-      id: 'upload',
-      when: 'Opening',
-      title: "Upload yesterday's Rista files",
-      text: s.salesUploaded && s.usageUploaded
-        ? `Uploaded at ${s.salesUploadTime}`
-        : 'Sales Summary + Consumption Variance for yesterday',
-      done: s.salesUploaded && s.usageUploaded,
-      href: '/store/upload',
-      icon: '📄',
-      time: s.salesUploadTime,
-      note: s.salesUploaded !== s.usageUploaded
-        ? (s.salesUploaded ? 'Consumption Variance still missing' : 'Sales Summary still missing')
-        : undefined,
-    },
-    {
       id: 'count',
       when: 'Closing',
       title: 'Count stock',
-      text: s.due ? `${s.counted} of ${s.due} items counted` : 'Nothing due tonight',
+      text: s.due
+        ? `${s.counted} of ${s.due} items counted${s.countedTime ? ` · Last at ${s.countedTime}` : ''}`
+        : 'Nothing due tonight',
       done: s.due === 0 || s.counted >= s.due,
       href: '/store/count',
       icon: '📦',
+      time: s.countedTime,
+    },
+    {
+      id: 'upload',
+      when: 'Closing',
+      title: "Upload today's Rista files",
+      text: s.salesUploaded && s.usageUploaded
+        ? `Uploaded at ${s.salesUploadTime || s.usageUploadTime}${s.salesUploadNet !== null ? ` · Net ${inr(s.salesUploadNet)}` : ''}`
+        : 'After last bill: Sales Summary + Consumption Variance',
+      done: s.salesUploaded && s.usageUploaded,
+      href: '/store/upload',
+      icon: '📄',
+      time: s.salesUploadTime || s.usageUploadTime,
+      note: s.salesUploaded !== s.usageUploaded
+        ? (s.salesUploaded ? 'Consumption Variance still missing' : 'Sales Summary still missing')
+        : undefined,
     },
     {
       id: 'ecash',

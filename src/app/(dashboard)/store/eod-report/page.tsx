@@ -4,13 +4,14 @@ import React, { useCallback, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { displayUnit, toDisplay } from '@/lib/stock/units';
 import { useActiveStore } from '@/lib/hooks/useActiveStore';
-import { istDate, formatDateTime, formatTime } from '@/lib/dates';
+import { istDate, addDays, displayDate, shortDate, formatDateTime, formatTime } from '@/lib/dates';
 import styles from '../store.module.css';
-import { isBRStore, toReportRows, BRReportRow, grams, signedGrams } from '@/lib/br';
+import { isBRStore, toReportRows, BRReportRow, grams, signedGrams, repairLateNightBRCounts } from '@/lib/br';
 
 export default function EODReportPage() {
-  const { supabase, store: activeStore, loading: storeLoading } = useActiveStore();
+  const { supabase, store: activeStore, stores, selectStore, profile, loading: storeLoading } = useActiveStore();
   const todayDate = istDate();
+  const yesterdayDate = addDays(todayDate, -1);
 
   const [selectedDate, setSelectedDate] = useState<string>(todayDate);
   const [loading, setLoading] = useState(true);
@@ -21,8 +22,9 @@ export default function EODReportPage() {
   const [cashTransactions, setCashTransactions] = useState<any[]>([]);
   const [wastageList, setWastageList] = useState<any[]>([]);
   const [deliveriesList, setDeliveriesList] = useState<any[]>([]);
-  const [openingWeighInfo, setOpeningWeighInfo] = useState<{ count: number; time: string | null } | null>(null);
+  const [openingWeighInfo, setOpeningWeighInfo] = useState<{ count: number; time: string | null; sub?: string } | null>(null);
   const [closingWeighInfo, setClosingWeighInfo] = useState<{ count: number; time: string | null } | null>(null);
+  const [usageUploadInfo, setUsageUploadInfo] = useState<{ time: string | null } | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [varianceAlerts, setVarianceAlerts] = useState<any[]>([]);
@@ -30,10 +32,26 @@ export default function EODReportPage() {
   const [stockError, setStockError] = useState<string | null>(null);
   const [brRows, setBrRows] = useState<BRReportRow[] | null>(null);
 
+  // Support ?date=YYYY-MM-DD from All Stores links
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const d = params.get('date');
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        setSelectedDate(d);
+      }
+    }
+  }, []);
+
   const loadStoreData = useCallback(async () => {
     if (!activeStore) { if (!storeLoading) setLoading(false); return; }
     setLoading(true);
     const storeId = activeStore.id;
+    const isBR = isBRStore(activeStore);
+
+    if (isBR) {
+      await repairLateNightBRCounts(supabase, storeId);
+    }
 
     const [
       { data: salesData },
@@ -42,6 +60,9 @@ export default function EODReportPage() {
       { data: wastage },
       { data: deliveries },
       { data: flavourCounts },
+      { data: generalDayCounts },
+      { data: generalPrevCounts },
+      { data: usageUploads },
       { data: rpcData, error: rpcErr },
     ] = await Promise.all([
       supabase.from('daily_sales_summary').select('*, staff_members(name)').eq('store_id', storeId).eq('entry_date', selectedDate).maybeSingle(),
@@ -50,10 +71,13 @@ export default function EODReportPage() {
       supabase.from('daily_wastage_log').select('id, quantity_wasted, created_at, items(name)').eq('store_id', storeId).eq('entry_date', selectedDate).order('created_at', { ascending: true }),
       supabase.from('purchase_orders').select('id, quantity, created_at, items(name)').eq('store_id', storeId).eq('entry_date', selectedDate).order('created_at', { ascending: true }),
       supabase.from('br_flavour_counts').select('session, created_at, updated_at, staff_members(name)').eq('store_id', storeId).eq('count_date', selectedDate),
+      supabase.from('stock_counts').select('item_id, created_at').eq('store_id', storeId).eq('entry_date', selectedDate),
+      supabase.from('stock_counts').select('entry_date, created_at').eq('store_id', storeId).lt('entry_date', selectedDate).order('entry_date', { ascending: false }).limit(20),
+      supabase.from('rista_consumption_uploads').select('uploaded_at').eq('store_id', storeId).lte('date_from', selectedDate).gte('date_to', selectedDate),
       supabase.rpc('stock_variance_report', { p_store_id: storeId, p_from: null, p_to: selectedDate }),
     ]);
 
-    if (isBRStore(activeStore)) {
+    if (isBR) {
       const { data: br, error: brErr } = await supabase.rpc('br_daily_report', { p_store_id: storeId, p_date: selectedDate });
       setBrRows(brErr ? [] : toReportRows(br));
     } else {
@@ -71,26 +95,48 @@ export default function EODReportPage() {
     setWastageList(wastage || []);
     setDeliveriesList(deliveries || []);
 
-    // Compute flavour count timings
-    if (flavourCounts && flavourCounts.length > 0) {
-      const openCounts = flavourCounts.filter(f => f.session === 'opening');
-      const closeCounts = flavourCounts.filter(f => f.session === 'closing');
+    if (isBR) {
+      // Compute BR flavour count timings
+      if (flavourCounts && flavourCounts.length > 0) {
+        const openCounts = flavourCounts.filter(f => f.session === 'opening');
+        const closeCounts = flavourCounts.filter(f => f.session === 'closing');
 
-      const latestOpen = openCounts.reduce<string | null>((latest, f) => {
-        const t = f.updated_at || f.created_at;
-        return !latest || (t && t > latest) ? t : latest;
-      }, null);
+        const latestOpen = openCounts.reduce<string | null>((latest, f) => {
+          const t = f.updated_at || f.created_at;
+          return !latest || (t && t > latest) ? t : latest;
+        }, null);
 
-      const latestClose = closeCounts.reduce<string | null>((latest, f) => {
-        const t = f.updated_at || f.created_at;
-        return !latest || (t && t > latest) ? t : latest;
-      }, null);
+        const latestClose = closeCounts.reduce<string | null>((latest, f) => {
+          const t = f.updated_at || f.created_at;
+          return !latest || (t && t > latest) ? t : latest;
+        }, null);
 
-      setOpeningWeighInfo(openCounts.length > 0 ? { count: openCounts.length, time: latestOpen } : null);
-      setClosingWeighInfo(closeCounts.length > 0 ? { count: closeCounts.length, time: latestClose } : null);
+        setOpeningWeighInfo(openCounts.length > 0 ? { count: openCounts.length, time: latestOpen } : null);
+        setClosingWeighInfo(closeCounts.length > 0 ? { count: closeCounts.length, time: latestClose } : null);
+      } else {
+        setOpeningWeighInfo(null);
+        setClosingWeighInfo(null);
+      }
+      setUsageUploadInfo(null);
     } else {
-      setOpeningWeighInfo(null);
-      setClosingWeighInfo(null);
+      // 99 Pancakes: previous closing count is opening baseline; today's stock_counts is closing count
+      const prevDate = generalPrevCounts && generalPrevCounts.length > 0 ? (generalPrevCounts[0] as any).entry_date : null;
+      const prevRowsForDate = prevDate ? (generalPrevCounts as any[]).filter(c => c.entry_date === prevDate) : [];
+      const prevTime = prevRowsForDate.reduce<string | null>((acc, c) => (!acc || (c.created_at && c.created_at > acc) ? c.created_at : acc), null);
+
+      setOpeningWeighInfo(
+        prevDate
+          ? { count: prevRowsForDate.length, time: prevTime, sub: `From ${shortDate(prevDate)} closing count` }
+          : null
+      );
+
+      const closeRows = generalDayCounts || [];
+      const closeTime = closeRows.reduce<string | null>((acc, c: any) => (!acc || (c.created_at && c.created_at > acc) ? c.created_at : acc), null);
+      setClosingWeighInfo(closeRows.length > 0 ? { count: closeRows.length, time: closeTime } : null);
+
+      const uRows = usageUploads || [];
+      const uTime = uRows.reduce<string | null>((acc, u: any) => (!acc || (u.uploaded_at && u.uploaded_at > acc) ? u.uploaded_at : acc), null);
+      setUsageUploadInfo(uRows.length > 0 ? { time: uTime } : null);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,13 +181,76 @@ export default function EODReportPage() {
     return `₹ ${Number(val).toLocaleString('en-IN')}`;
   };
 
+  const isBR = isBRStore(activeStore);
+  const isAdminUser = profile?.role === 'super_admin' || profile?.role === 'admin';
+
   return (
     <div className={styles.container}>
-      <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* 1-Click Store Switcher Bar for Admin / Multi-store users */}
+      {stores.length > 1 && (
+        <div style={{
+          marginBottom: '1rem',
+          padding: '0.65rem 1.1rem',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>
+              🏬 Switch Store:
+            </span>
+            {stores.map(s => {
+              const active = activeStore?.id === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => selectStore(s.id)}
+                  style={{
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '8px',
+                    border: active ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                    background: active ? 'var(--accent-primary)' : 'var(--bg-card)',
+                    color: active ? '#fff' : 'var(--text-primary)',
+                    fontWeight: active ? 700 : 500,
+                    fontSize: '0.84rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                  }}
+                >
+                  <span>{isBRStore(s) ? '🍨' : '🥞'}</span>
+                  <span>{s.name}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {isAdminUser && (
+              <>
+                <Link href="/super-admin" className={styles.backLink} style={{ padding: '0.38rem 0.75rem', fontSize: '0.8rem' }}>
+                  ← All Stores
+                </Link>
+                <Link href={`/super-admin/stock-report?date=${selectedDate}`} className={styles.backLink} style={{ padding: '0.38rem 0.75rem', fontSize: '0.8rem' }}>
+                  📊 Stock Report
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <header className={styles.header} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 className={styles.title}>End-Of-Day (EOD) Operations Summary</h1>
+          <h1 className={styles.title}>🖨️ Day Summary (EOD Report){activeStore ? ` — ${activeStore.name}` : ''}</h1>
           <p className={styles.subtitle}>
-            Comprehensive daily operational closing report for {activeStore ? activeStore.name : 'Selected Store'}
+            Sales Day: <strong>{displayDate(selectedDate)}</strong> · Opening, Closing (including post-midnight up to 6:00 AM), Cash &amp; Stock
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -163,28 +272,93 @@ export default function EODReportPage() {
         </div>
       </header>
 
-      {/* Date Filter Bar */}
-      <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Target Store</span>
-            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--accent-primary)' }}>
-              🏬 {activeStore ? activeStore.name : 'Loading...'}
-            </div>
+      {/* Unified Sales Day (Operating Shift Date) Bar */}
+      <div className={styles.card} style={{
+        marginBottom: '1.5rem',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '1rem',
+        background: 'linear-gradient(90deg, rgba(95,107,255,0.10), rgba(0,200,83,0.05))',
+        border: '1px solid rgba(95,107,255,0.3)',
+      }}>
+        <div>
+          <span style={{ fontSize: '0.78rem', color: '#9aa4ff', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            📅 Viewing Sales Day (Shift Operating Date)
+          </span>
+          <div style={{ fontSize: '1.15rem', fontWeight: 700, marginTop: '0.15rem' }}>
+            {displayDate(selectedDate)}
+            {selectedDate === todayDate && (
+              <span style={{ marginLeft: '0.6rem', fontSize: '0.75rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(0,200,83,0.18)', color: '#69f0ae', fontWeight: 600 }}>
+                Active Shift
+              </span>
+            )}
+            {selectedDate === yesterdayDate && (
+              <span style={{ marginLeft: '0.6rem', fontSize: '0.75rem', padding: '0.2rem 0.55rem', borderRadius: '999px', background: 'rgba(255,214,0,0.16)', color: '#ffd740', fontWeight: 600 }}>
+                Yesterday&apos;s Shift
+              </span>
+            )}
           </div>
+        </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-              Shift Operating Date
-            </label>
-            <input
-              type="date"
-              value={selectedDate}
-              max={todayDate}
-              onChange={e => setSelectedDate(e.target.value)}
-              style={{ padding: '0.6rem 1rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
-            />
-          </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(yesterdayDate)}
+            style={{
+              padding: '0.45rem 0.85rem',
+              borderRadius: '8px',
+              border: selectedDate === yesterdayDate ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+              background: selectedDate === yesterdayDate ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+              color: selectedDate === yesterdayDate ? '#fff' : 'var(--text-primary)',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+            }}
+          >
+            ⏮️ Yesterday ({shortDate(yesterdayDate)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(todayDate)}
+            style={{
+              padding: '0.45rem 0.85rem',
+              borderRadius: '8px',
+              border: selectedDate === todayDate ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+              background: selectedDate === todayDate ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+              color: selectedDate === todayDate ? '#fff' : 'var(--text-primary)',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+            }}
+          >
+            📅 Active Shift ({shortDate(todayDate)})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(addDays(selectedDate, -1))}
+            style={{ padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer' }}
+            title="Previous Day"
+          >
+            ‹
+          </button>
+          <input
+            type="date"
+            value={selectedDate}
+            max={todayDate}
+            onChange={e => e.target.value && setSelectedDate(e.target.value)}
+            style={{ padding: '0.45rem 0.75rem', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+          />
+          <button
+            type="button"
+            onClick={() => selectedDate < todayDate && setSelectedDate(addDays(selectedDate, 1))}
+            disabled={selectedDate >= todayDate}
+            style={{ padding: '0.45rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer', opacity: selectedDate >= todayDate ? 0.4 : 1 }}
+            title="Next Day"
+          >
+            ›
+          </button>
         </div>
       </div>
 
@@ -198,10 +372,10 @@ export default function EODReportPage() {
           {/* Operations Audit Trail & Timestamps */}
           <div className={styles.timelineCard}>
             <div className={styles.timelineTitle}>
-              🕒 Operational Timeline & Exact Activity Timestamps ({selectedDate})
+              🕒 Operational Timeline &amp; Exact Activity Timestamps — Sales Day: {displayDate(selectedDate)}
             </div>
             <p className={styles.subtitle} style={{ marginBottom: '1rem' }}>
-              Exact time and data when staff performed each opening, closing, cash, and stock action:
+              Exact date &amp; time when staff recorded each opening, closing, cash, and stock entry for this Sales Day (closing entries after midnight up to 6:00 AM are automatically matched here):
             </p>
             <div className={styles.timelineGrid}>
               {/* Morning Cash */}
@@ -221,18 +395,22 @@ export default function EODReportPage() {
                 </div>
               </div>
 
-              {/* Opening Stock Weigh */}
+              {/* Opening Stock Weigh / Baseline */}
               <div className={`${styles.timelineItem} ${openingWeighInfo ? styles.timelineItemDone : ''}`}>
                 <div className={styles.timelineHeader}>
-                  <span className={styles.timelineLabel}>🍨 Opening Flavour Weigh</span>
+                  <span className={styles.timelineLabel}>
+                    {isBR ? '🍨 Opening Flavour Weigh' : '🥞 Opening Stock Baseline'}
+                  </span>
                   {openingWeighInfo?.time ? (
                     <span className={styles.timelineTime}>{formatDateTime(openingWeighInfo.time)}</span>
                   ) : (
-                    <span className={styles.timelineTimeMissing}>Not weighed</span>
+                    <span className={styles.timelineTimeMissing}>{isBR ? 'Not weighed' : 'No prior count'}</span>
                   )}
                 </div>
                 <div className={styles.timelineMeta}>
-                  {openingWeighInfo ? `${openingWeighInfo.count} flavours weighed before opening` : 'Opening stock count'}
+                  {isBR
+                    ? (openingWeighInfo ? `${openingWeighInfo.count} flavours weighed before opening` : 'Opening stock count')
+                    : (openingWeighInfo?.sub || 'Previous closing count serves as opening stock')}
                 </div>
               </div>
 
@@ -266,18 +444,22 @@ export default function EODReportPage() {
                 </div>
               </div>
 
-              {/* Closing Stock Weigh */}
+              {/* Closing Stock Weigh / Count */}
               <div className={`${styles.timelineItem} ${closingWeighInfo ? styles.timelineItemDone : ''}`}>
                 <div className={styles.timelineHeader}>
-                  <span className={styles.timelineLabel}>🍨 Closing Flavour Weigh</span>
+                  <span className={styles.timelineLabel}>
+                    {isBR ? '🍨 Closing Flavour Weigh' : '🥞 Closing Stock Count'}
+                  </span>
                   {closingWeighInfo?.time ? (
                     <span className={styles.timelineTime}>{formatDateTime(closingWeighInfo.time)}</span>
                   ) : (
-                    <span className={styles.timelineTimeMissing}>Not weighed</span>
+                    <span className={styles.timelineTimeMissing}>{isBR ? 'Not weighed' : 'Not counted'}</span>
                   )}
                 </div>
                 <div className={styles.timelineMeta}>
-                  {closingWeighInfo ? `${closingWeighInfo.count} flavours weighed at closing` : 'Closing inventory after last bill'}
+                  {closingWeighInfo
+                    ? `${closingWeighInfo.count} ${isBR ? 'flavours weighed' : 'items counted'} at closing`
+                    : 'Closing inventory after last bill'}
                 </div>
               </div>
 
@@ -312,6 +494,23 @@ export default function EODReportPage() {
                   {posSales ? `Net: ${formatCurrency(posSales.net_sales)} · ${posSales.total_orders || 0} orders` : 'Rista daily sales files'}
                 </div>
               </div>
+
+              {/* Rista Usage Upload (for 99 Pancakes) */}
+              {!isBR && (
+                <div className={`${styles.timelineItem} ${usageUploadInfo ? styles.timelineItemDone : ''}`}>
+                  <div className={styles.timelineHeader}>
+                    <span className={styles.timelineLabel}>📊 Rista Usage Upload</span>
+                    {usageUploadInfo?.time ? (
+                      <span className={styles.timelineTime}>{formatDateTime(usageUploadInfo.time)}</span>
+                    ) : (
+                      <span className={styles.timelineTimeMissing}>Not uploaded</span>
+                    )}
+                  </div>
+                  <div className={styles.timelineMeta}>
+                    {usageUploadInfo ? 'Consumption Variance uploaded' : 'Required to calculate recipe usage'}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

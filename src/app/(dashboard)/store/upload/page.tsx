@@ -38,18 +38,18 @@ export default function UploadPage() {
   // Admin check: Only admin or super_admin can manually pick historical / previous dates
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
 
-  // Calendar dates in IST
+  // Active shift operating date in IST (honouring 6:00 AM post-midnight cutoff)
+  const activeShiftDate = istDate();
+  const prevShiftDate = addDays(activeShiftDate, -1);
   const todayCal = istDate(new Date());
-  const yesterdayCal = addDays(todayCal, -1);
 
   const [files, setFiles] = useState<Parsed[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [audit, setAudit] = useState<MonthEnd | null>(null);
 
-  // Admin date selection state
-  const [itemsDate, setItemsDate] = useState(yesterdayCal);
-  const [usageFrom, setUsageFrom] = useState(yesterdayCal);
-  const [auditDate, setAuditDate] = useState(todayCal);
+  // Admin date selection state (defaults to active shift operating date)
+  const [itemsDate, setItemsDate] = useState(activeShiftDate);
+  const [auditDate, setAuditDate] = useState(activeShiftDate);
 
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -62,9 +62,8 @@ export default function UploadPage() {
   // Effective sales date:
   // 1. If Sales Summary is present, the date is extracted directly from the Sales Summary file.
   // 2. If admin is uploading without summary, use admin's selected itemsDate.
-  // 3. For store staff uploading: if file date is detected from filename use it; if late night (00:00-05:59) default to yesterday; otherwise today.
-  const isLateNight = new Date().getHours() < 6;
-  const staffDefaultDate = isLateNight ? yesterdayCal : todayCal;
+  // 3. For store staff uploading: if file date is detected from filename use it; otherwise active shift date (istDate()).
+  const staffDefaultDate = activeShiftDate;
   const effectiveDate = summary?.date || (isAdmin ? itemsDate : (items?.date || staffDefaultDate));
 
   // ---- read files ----
@@ -136,9 +135,6 @@ export default function UploadPage() {
   }
 
   if (audit) problems.push(...audit.warnings.map(w => `${audit.fileName}: ${w}`));
-  if (usage && !summary && usageFrom > (isAdmin ? itemsDate : istDate())) {
-    problems.push('Rista usage: "From" date is after the "To" date.');
-  }
 
   const canSave = Boolean(
     store &&
@@ -191,7 +187,7 @@ export default function UploadPage() {
       if (usage) {
         const lines = usage.lines.map(l => ({ sku: l.sku, name: l.name, category: l.category, unit: l.unit, ideal_qty: l.ideal_qty, rate: l.rate }));
         const call = (replace: boolean) => supabase.rpc('save_rista_consumption', {
-          p_store_id: store.id, p_from: summary ? effectiveDate : usageFrom, p_to: effectiveDate, p_file: usage.fileName, p_lines: lines, p_replace: replace,
+          p_store_id: store.id, p_from: effectiveDate, p_to: effectiveDate, p_file: usage.fileName, p_lines: lines, p_replace: replace,
         });
         let { error } = await call(false);
         if (error && /OVERLAP/.test(error.message)) {
@@ -319,17 +315,17 @@ export default function UploadPage() {
           <div className={styles.dateButtonGroup}>
             <button
               type="button"
-              className={`${styles.dateBtn} ${itemsDate === yesterdayCal ? styles.dateBtnActive : ''}`}
-              onClick={() => setItemsDate(yesterdayCal)}
+              className={`${styles.dateBtn} ${itemsDate === prevShiftDate ? styles.dateBtnActive : ''}`}
+              onClick={() => setItemsDate(prevShiftDate)}
             >
-              ⏮️ Previous Day (Yesterday · {formatShortDate(yesterdayCal)})
+              ⏮️ Previous Shift ({formatShortDate(prevShiftDate)})
             </button>
             <button
               type="button"
-              className={`${styles.dateBtn} ${itemsDate === todayCal ? styles.dateBtnActive : ''}`}
-              onClick={() => setItemsDate(todayCal)}
+              className={`${styles.dateBtn} ${itemsDate === activeShiftDate ? styles.dateBtnActive : ''}`}
+              onClick={() => setItemsDate(activeShiftDate)}
             >
-              📅 Today ({formatShortDate(todayCal)})
+              📅 Active Shift ({formatShortDate(activeShiftDate)})
             </button>
             <input
               type="date"

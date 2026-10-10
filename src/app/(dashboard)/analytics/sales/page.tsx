@@ -1,6 +1,6 @@
 'use client';
 
-import { istDate, addDays } from '@/lib/dates';
+import { istDate, addDays, displayDate, shortDate } from '@/lib/dates';
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -40,18 +40,25 @@ interface SalesItem {
 
 export default function SalesAnalyticsPage() {
   const supabase = createClient();
+  const activeShiftDate = istDate();
+  const yesterdayShiftDate = addDays(activeShiftDate, -1);
 
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStore, setSelectedStore] = useState<string>('all');
-  const [selectedDate, setSelectedDate] = useState<string>(
-    addDays(istDate(), -1) // the Sales Summary is uploaded at night, so yesterday is the latest full day
-  );
+  const [selectedDate, setSelectedDate] = useState<string>(activeShiftDate);
   
   const [salesData, setSalesData] = useState<DailySalesSummary[]>([]);
   const [topItems, setTopItems] = useState<SalesItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const d = params.get('date');
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        setSelectedDate(d);
+      }
+    }
     fetchStores();
   }, []);
 
@@ -150,46 +157,128 @@ export default function SalesAnalyticsPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Sales</h1>
-          <p className={styles.subtitle}>One day&apos;s sales by store and channel.</p>
+          <h1 className={styles.title}>Sales — {displayDate(selectedDate)}</h1>
+          <p className={styles.subtitle}>Daily sales by store and payment channel (matched to the Shift Operating Date).</p>
         </div>
         <Link href="/analytics/trends" className={styles.primaryButton}>
           📈 See trends over time
         </Link>
       </div>
 
-      {/* Filter Bar */}
-      <div className={styles.filterBar} style={{ marginBottom: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: '200px' }}>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-            Store Filter
-          </label>
-          <select
-            value={selectedStore}
-            onChange={e => setSelectedStore(e.target.value)}
-            className={styles.selectFilter}
-            style={{ width: '100%' }}
-          >
-            <option value="all">All Stores</option>
-            {stores.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.brands?.name || s.code})
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Unified Store & Sales Day Filter Bar */}
+      <div className={styles.card} style={{
+        marginBottom: '1.5rem',
+        padding: '1rem 1.25rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem',
+        background: 'linear-gradient(90deg, rgba(95,107,255,0.10), rgba(0,200,83,0.05))',
+        border: '1px solid rgba(95,107,255,0.3)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#9aa4ff', marginRight: '0.25rem' }}>
+              🏬 Store:
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedStore('all')}
+              style={{
+                padding: '0.4rem 0.85rem',
+                borderRadius: '8px',
+                border: selectedStore === 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                background: selectedStore === 'all' ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                color: selectedStore === 'all' ? '#fff' : 'var(--text-primary)',
+                fontWeight: selectedStore === 'all' ? 700 : 500,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+              }}
+            >
+              All Stores ({stores.length})
+            </button>
+            {stores.map(s => {
+              const active = selectedStore === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSelectedStore(s.id)}
+                  style={{
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '8px',
+                    border: active ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                    background: active ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                    color: active ? '#fff' : 'var(--text-primary)',
+                    fontWeight: active ? 700 : 500,
+                    fontSize: '0.84rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {s.name}
+                </button>
+              );
+            })}
+          </div>
 
-        <div style={{ flex: 1, minWidth: '180px' }}>
-          <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-            Audit Date
-          </label>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={e => setSelectedDate(e.target.value)}
-            className={styles.searchInput}
-            style={{ width: '100%' }}
-          />
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(yesterdayShiftDate)}
+              style={{
+                padding: '0.42rem 0.85rem',
+                borderRadius: '8px',
+                border: selectedDate === yesterdayShiftDate ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                background: selectedDate === yesterdayShiftDate ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                color: selectedDate === yesterdayShiftDate ? '#fff' : 'var(--text-primary)',
+                fontWeight: 600,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+              }}
+            >
+              ⏮️ Yesterday ({shortDate(yesterdayShiftDate)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(activeShiftDate)}
+              style={{
+                padding: '0.42rem 0.85rem',
+                borderRadius: '8px',
+                border: selectedDate === activeShiftDate ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                background: selectedDate === activeShiftDate ? 'var(--accent-primary)' : 'var(--bg-secondary)',
+                color: selectedDate === activeShiftDate ? '#fff' : 'var(--text-primary)',
+                fontWeight: 600,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+              }}
+            >
+              📅 Active Shift ({shortDate(activeShiftDate)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(addDays(selectedDate, -1))}
+              style={{ padding: '0.42rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer' }}
+              title="Previous Day"
+            >
+              ‹
+            </button>
+            <input
+              type="date"
+              value={selectedDate}
+              max={activeShiftDate}
+              onChange={e => e.target.value && setSelectedDate(e.target.value)}
+              className={styles.searchInput}
+              style={{ width: 'auto', padding: '0.42rem 0.75rem' }}
+            />
+            <button
+              type="button"
+              onClick={() => selectedDate < activeShiftDate && setSelectedDate(addDays(selectedDate, 1))}
+              disabled={selectedDate >= activeShiftDate}
+              style={{ padding: '0.42rem 0.7rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer', opacity: selectedDate >= activeShiftDate ? 0.4 : 1 }}
+              title="Next Day"
+            >
+              ›
+            </button>
+          </div>
         </div>
       </div>
 
