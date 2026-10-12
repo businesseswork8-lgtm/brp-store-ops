@@ -25,7 +25,7 @@ export function isMonthEndAudit(headText: string) {
 }
 
 export function parseMonthEndAudit(content: ArrayBuffer): { lines: AuditLine[]; warnings: string[] } {
-  const wb = XLSX.read(content, { type: 'array', raw: true, cellFormula: false });
+  const wb = XLSX.read(content, { type: 'array', raw: true });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false }) as string[][];
   const head = (rows[0] || []).map(h => String(h).trim().toUpperCase());
   const c = (n: string) => head.indexOf(n);
@@ -62,12 +62,12 @@ export type CompanyAudit = {
 };
 
 export function isCompanyAudit(content: ArrayBuffer) {
-  try { return XLSX.read(content, { type: 'array', bookSheets: true, cellFormula: false }).SheetNames.some(n => /stock audit working/i.test(n)); }
+  try { return XLSX.read(content, { type: 'array', bookSheets: true }).SheetNames.some(n => /stock audit working/i.test(n)); }
   catch { return false; }
 }
 
 export function parseCompanyAudit(content: ArrayBuffer): CompanyAudit {
-  const wb = XLSX.read(content, { type: 'array', cellDates: true, cellFormula: false });
+  const wb = XLSX.read(content, { type: 'array', cellDates: true });
   const name = wb.SheetNames.find(n => /stock audit working/i.test(n));
   const out: CompanyAudit = { store: null, lastDate: null, auditDate: null, totals: {}, lines: [], warnings: [] };
   if (!name) { out.warnings.push('Sheet "Stock Audit Working MTD" not found.'); return out; }

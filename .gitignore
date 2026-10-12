@@ -10,50 +10,32 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing & coverage
+# testing
 /coverage
 
-# next.js build output
+# next.js
 /.next/
 /out/
+
+# production
 /build
 
-# environment files & secrets
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env*.local
-!.env.example
-
-# cryptographic keys, certificates & credentials
+# misc
+.DS_Store
 *.pem
-*.key
-*.pub
-*.cert
-*.crt
-*.pfx
-*.p12
-*secret*
-*credential*
 
-# debug and system logs
+# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# system & IDE artifacts
-.DS_Store
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
 *.tsbuildinfo
 next-env.d.ts
-.idea/
-.vscode/
-*.swp
-*.swo
-*.bak
-scratch/
-
-# vercel deployment
-.vercel

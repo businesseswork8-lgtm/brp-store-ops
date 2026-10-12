@@ -27,7 +27,7 @@ export function consumptionBranch(fileName: string): string | null {
 }
 
 export function parseConsumption(content: ArrayBuffer, fileName: string): ParsedConsumption {
-  const wb = XLSX.read(content, { type: 'array', raw: true, cellFormula: false });
+  const wb = XLSX.read(content, { type: 'array', raw: true });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false }) as string[][];
   const out: ParsedConsumption = { branch: consumptionBranch(fileName), lines: [], warnings: [] };
   if (!rows.length) { out.warnings.push('The file is empty.'); return out; }

@@ -4,12 +4,11 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { validateEmail } from '@/lib/security/sanitize';
 import styles from './login.module.css';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [supabase] = useState(() => createClient());
+  const supabase = createClient();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,19 +18,12 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    const emailCheck = validateEmail(email);
-    if (!emailCheck.valid) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-
     setLoading(true);
+    setError(null);
 
     try {
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: emailCheck.email,
+        email,
         password,
       });
 
