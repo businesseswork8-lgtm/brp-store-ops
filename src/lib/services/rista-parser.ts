@@ -123,8 +123,8 @@ function paymentColumn(name: string): keyof SalesSummary {
 
 export function parseRistaPOSFile(fileContent: string | ArrayBuffer, fileName = ''): ParsedPOSReport {
   const workbook = typeof fileContent === 'string'
-    ? XLSX.read(fileContent, { type: 'string', raw: true })
-    : XLSX.read(fileContent, { type: 'array', raw: true })
+    ? XLSX.read(fileContent, { type: 'string', raw: true, cellFormula: false })
+    : XLSX.read(fileContent, { type: 'array', raw: true, cellFormula: false })
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false }) as string[][]
 

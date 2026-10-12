@@ -751,3 +751,12 @@ textarea.form-control {
     border-color: #ccc !important;
   }
 }
+
+@media (max-width: 768px) {
+  .dashboard-main-content {
+    margin-left: 0 !important;
+  }
+  .dashboard-main-body {
+    padding: 10px !important;
+  }
+}

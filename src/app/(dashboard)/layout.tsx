@@ -1,12 +1,31 @@
 import React from 'react';
+import { redirect } from 'next/navigation';
+import { createClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect('/login');
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, is_active')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || profile.is_active === false) {
+    redirect('/login');
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-primary, #0a0a0f)' }}>
       <Sidebar />
@@ -26,16 +45,6 @@ export default function DashboardLayout({
           {children}
         </main>
       </div>
-      <style dangerouslySetInnerHTML={{__html: `
-        @media (max-width: 768px) {
-          .dashboard-main-content {
-            margin-left: 0 !important;
-          }
-          .dashboard-main-body {
-            padding: 10px !important;
-          }
-        }
-      `}} />
     </div>
   );
 }

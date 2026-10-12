@@ -17,6 +17,40 @@ export type BRReportRow = {
   status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED';
 };
 
+export type BRPeriodReportRow = {
+  item_id: string;
+  code: string | null;
+  flavour: string;
+  range_name: string;
+  is_gelato: boolean;
+  opening: number | null;
+  opening_date: string | null;
+  opening_session: string | null;
+  received: number;
+  received_boxes: number;
+  closing: number | null;
+  closing_date: string | null;
+  closing_session: string | null;
+  used: number | null;
+  sold: number;
+  wasted: number;
+  expected_closing: number | null;
+  gap: number | null;
+  allowance: number;
+  shortageGrams: number;
+  status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED';
+};
+
+export function boxesLabel(grams: number, fullBoxGrams = 2250): string {
+  if (!grams || grams <= 0) return '0 boxes';
+  const b = grams / fullBoxGrams;
+  if (Math.abs(b - Math.round(b)) < 0.01) {
+    const intB = Math.round(b);
+    return `${intB} box${intB === 1 ? '' : 'es'}`;
+  }
+  return `${b.toFixed(1)} boxes`;
+}
+
 export type BRSalesLine = {
   sales_key: string; item_name: string; variant: string; item_type: string; category: string; quantity: number;
   item_id: string | null; flavour_name: string | null; size_id: string | null; size_name: string | null;

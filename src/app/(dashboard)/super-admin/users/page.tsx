@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { sanitizeText, validateEmail, validatePasswordStrength } from '@/lib/security/sanitize';
 import styles from './users.module.css';
 
 interface Store {
@@ -111,10 +112,14 @@ export default function UserAndStaffManagementPage() {
   // --- STAFF MEMBER HANDLERS ---
   async function handleCreateStaff(e: React.FormEvent) {
     e.preventDefault();
-    if (!newStaff.name || !newStaff.store_id) return;
+    const cleanName = sanitizeText(newStaff.name, 100);
+    if (!cleanName || !newStaff.store_id) {
+      alert('Staff member name and store selection are required.');
+      return;
+    }
 
     const { error } = await supabase.from('staff_members').insert({
-      name: newStaff.name.trim(),
+      name: cleanName,
       store_id: newStaff.store_id,
       is_active: true,
     });
@@ -139,10 +144,16 @@ export default function UserAndStaffManagementPage() {
   }
 
   async function handleSaveStaffEdit(staffId: string) {
+    const cleanName = sanitizeText(editStaffForm.name, 100);
+    if (!cleanName || !editStaffForm.store_id) {
+      alert('Staff name and store selection are required.');
+      return;
+    }
+
     const { error } = await supabase
       .from('staff_members')
       .update({
-        name: editStaffForm.name.trim(),
+        name: cleanName,
         store_id: editStaffForm.store_id,
       })
       .eq('id', staffId);
@@ -158,16 +169,22 @@ export default function UserAndStaffManagementPage() {
   // --- USER PROFILE HANDLERS ---
   async function handleCreateUser(e: React.FormEvent) {
     e.preventDefault();
-    if (!newUser.email || !newUser.password || !newUser.full_name) return;
+    const cleanName = sanitizeText(newUser.full_name, 100);
+    const emailCheck = validateEmail(newUser.email);
+    const passCheck = validatePasswordStrength(newUser.password);
+
+    if (!cleanName) { alert('Full name is required.'); return; }
+    if (!emailCheck.valid) { alert(emailCheck.error || 'Invalid email address.'); return; }
+    if (!passCheck.valid) { alert(passCheck.error || 'Password is not strong enough.'); return; }
 
     // Created on the server (service-role key) so the current Super Admin stays logged in
     const res = await fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: newUser.email.trim(),
+        email: emailCheck.email,
         password: newUser.password,
-        full_name: newUser.full_name.trim(),
+        full_name: cleanName,
         role: newUser.role,
         store_access: newUser.store_access,
         can_edit: newUser.can_edit,
@@ -181,13 +198,17 @@ export default function UserAndStaffManagementPage() {
     setIsAddingUser(false);
     setNewUser({ full_name: '', email: '', password: '', role: 'store', store_access: [], can_edit: false });
     fetchData();
-    alert(`Login ${newUser.email} created.`);
+    alert(`Login ${emailCheck.email} created.`);
   }
 
   async function handleSetPassword(user: UserProfile) {
-    const password = prompt(`New password for ${user.full_name || user.email} (at least 6 characters):`);
+    const password = prompt(`New password for ${user.full_name || user.email} (at least 8 characters, letters and numbers):`);
     if (password === null) return;
-    if (password.length < 6) { alert('Password must be at least 6 characters.'); return; }
+    const passCheck = validatePasswordStrength(password);
+    if (!passCheck.valid) {
+      alert(passCheck.error || 'Password is not strong enough.');
+      return;
+    }
     const res = await fetch('/api/admin/users', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

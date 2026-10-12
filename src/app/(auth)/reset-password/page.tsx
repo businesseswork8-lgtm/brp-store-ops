@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { validatePasswordStrength, validateEmail } from '@/lib/security/sanitize';
 import styles from './reset-password.module.css';
 
 export default function ResetPasswordPage() {
@@ -61,11 +62,18 @@ export default function ResetPasswordPage() {
 
   const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError(null);
     setSuccess(null);
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    const emailCheck = validateEmail(email);
+    if (!emailCheck.valid) {
+      setError(emailCheck.error || 'Please enter a valid email address.');
+      return;
+    }
+
+    setLoading(true);
+
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(emailCheck.email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     setLoading(false);
@@ -84,7 +92,13 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setError(null);
     setSuccess(null);
-    if (newPassword.length < 6) { setError('Password must be at least 6 characters'); return; }
+
+    const passwordCheck = validatePasswordStrength(newPassword);
+    if (!passwordCheck.valid) {
+      setError(passwordCheck.error || 'Password is not strong enough.');
+      return;
+    }
+
     if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
 
     setLoading(true);
