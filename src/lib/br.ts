@@ -14,7 +14,7 @@ export type BRReportRow = {
   opening: number | null; received: number; closing: number | null; used: number | null;
   sold: number; wasted: number; gap: number | null; allowance: number;
   prev_closing: number | null; overnight_change: number | null;
-  status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED';
+  status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED' | 'NOT_INTRODUCED';
 };
 
 export type BRPeriodReportRow = {
@@ -26,11 +26,15 @@ export type BRPeriodReportRow = {
   opening: number | null;
   opening_date: string | null;
   opening_session: string | null;
+  opening_unopened_boxes?: number;
+  opening_open_box_gross?: number;
   received: number;
   received_boxes: number;
   closing: number | null;
   closing_date: string | null;
   closing_session: string | null;
+  closing_unopened_boxes?: number;
+  closing_open_box_gross?: number;
   used: number | null;
   sold: number;
   wasted: number;
@@ -38,7 +42,7 @@ export type BRPeriodReportRow = {
   gap: number | null;
   allowance: number;
   shortageGrams: number;
-  status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED';
+  status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED' | 'NOT_INTRODUCED';
 };
 
 export function boxesLabel(grams: number, fullBoxGrams = 2250): string {
@@ -63,6 +67,7 @@ export const BR_STATUS: Record<BRReportRow['status'], { label: string; cls: 'bad
   OK: { label: '✓ OK', cls: 'badgeSuccess', help: 'Within allowance.' },
   NO_SALES: { label: '📊 Pending Sales', cls: 'badgeDefault', help: 'Sales By Items not uploaded for this day.' },
   NOT_COUNTED: { label: '⏳ Pending Weigh', cls: 'badgeDefault', help: 'Opening or closing weigh is missing.' },
+  NOT_INTRODUCED: { label: '🆕 Not in Store Yet', cls: 'badgeDefault', help: 'This flavour had not arrived or been weighed yet during this historical period window.' },
 };
 
 /** Grams → "1.25 kg" / "850 g" */

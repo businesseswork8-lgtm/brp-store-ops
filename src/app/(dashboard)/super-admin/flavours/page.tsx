@@ -44,9 +44,11 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
   const [search, setSearch] = useState('');
   const [showRemoved, setShowRemoved] = useState(false);
   const [form, setForm] = useState({ name: '', category_id: '', sub_category: SUB_CATEGORIES[0], is_new: true });
-  const [tab, setTab] = useState<Tab>(initialTab || 'sizes');
+  const [tab, setTab] = useState<Tab>(initialTab || 'flavours');
   const [allowEdits, setAllowEdits] = useState<Record<string, string>>({});
   const [namesEdits, setNamesEdits] = useState<Record<string, string>>({});
+  const [nameEdits, setNameEdits] = useState<Record<string, string>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
 
   const notify = (text: string, ok = true) => {
@@ -129,6 +131,24 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
     if (error) { notify('Could not save: ' + error.message, false); return; }
     setNamesEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
     notify(`${f.name}: Rista names saved`);
+    load();
+  };
+
+  const saveName = async (f: Flavour) => {
+    const v = (nameEdits[f.id] ?? '').trim();
+    const clear = () => {
+      setNameEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
+      setEditingId(null);
+    };
+    if (!v || v === f.name) { clear(); return; }
+    if (flavours.some(o => o.id !== f.id && o.name.toLowerCase() === v.toLowerCase())) {
+      notify('Another flavour already has this name', false);
+      return;
+    }
+    const { error } = await supabase.from('items').update({ name: v }).eq('id', f.id);
+    if (error) { notify('Could not rename: ' + error.message, false); return; }
+    clear();
+    notify(`Renamed to ${v}`);
     load();
   };
 
@@ -237,7 +257,53 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
             {list.map(f => (
               <div key={f.id} className={`${styles.row} ${f.is_active ? '' : styles.off}`}>
                 <span className={styles.name}>
-                  {f.name}
+                  {editingId === f.id ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <input
+                        className={styles.search}
+                        style={{ width: 190, minWidth: 0, flex: 'none', fontWeight: 600, padding: '0.4rem 0.5rem' }}
+                        autoFocus
+                        value={nameEdits[f.id] ?? f.name}
+                        onChange={e => setNameEdits(a => ({ ...a, [f.id]: e.target.value }))}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveName(f);
+                          if (e.key === 'Escape') { setEditingId(null); }
+                        }}
+                      />
+                      <button
+                        className={styles.primary}
+                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                        onClick={() => saveName(f)}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className={styles.secondary}
+                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                        onClick={() => { setEditingId(null); }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ) : (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <span>{f.name}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className={styles.secondary}
+                          style={{ padding: '0.15rem 0.45rem', fontSize: '0.75rem', lineHeight: 1 }}
+                          title="Rename flavour"
+                          onClick={() => {
+                            setEditingId(f.id);
+                            setNameEdits(a => ({ ...a, [f.id]: f.name }));
+                          }}
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
+                    </span>
+                  )}
                   {f.is_new && <span className={styles.newTag}>New</span>}
                   {!f.is_active && <span className={styles.count}> (removed)</span>}
                 </span>

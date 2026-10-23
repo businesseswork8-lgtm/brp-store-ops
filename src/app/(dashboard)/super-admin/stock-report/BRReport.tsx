@@ -68,13 +68,46 @@ function findEndCount(counts: CountRecord[], targetTo: string): CountRecord | nu
   // 1. Closing on targetTo
   const cl = counts.find(c => c.count_date === targetTo && c.session === 'closing');
   if (cl) return cl;
-  // 2. Opening on targetTo (e.g. today daytime before store closing)
+  // 2. Opening on targetTo (represents physical stock at end of targetTo - 1 / start of targetTo)
   const op = counts.find(c => c.count_date === targetTo && c.session === 'opening');
   if (op) return op;
-  // 3. Latest count on or before targetTo
-  const before = counts.filter(c => c.count_date <= targetTo).sort((a, b) => b.count_date.localeCompare(a.count_date) || (b.session === 'closing' ? -1 : 1));
+  // 3. Latest count on or before targetTo (prefer closing over opening on the same date)
+  const before = counts
+    .filter(c => c.count_date <= targetTo)
+    .sort((a, b) => b.count_date.localeCompare(a.count_date) || (b.session === 'closing' ? -1 : 1));
   if (before.length > 0) return before[0];
   return null;
+}
+
+/**
+ * Fetch all flavour counts in a date range using pagination to avoid Supabase PostgREST's
+ * default 1,000-row single-request cap on 15-day / 30-day views.
+ */
+async function fetchAllFlavourCounts(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  storeId: string,
+  fromDate: string,
+  toDate: string
+): Promise<CountRecord[]> {
+  const pageSize = 1000;
+  const all: CountRecord[] = [];
+  for (let offset = 0; offset < 10000; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('br_flavour_counts')
+      .select('item_id, count_date, session, unopened_boxes, open_box_gross, grams, created_at, updated_at, staff_members(name)')
+      .eq('store_id', storeId)
+      .gte('count_date', fromDate)
+      .lte('count_date', toDate)
+      .order('count_date', { ascending: true })
+      .order('session', { ascending: true })
+      .order('item_id', { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error || !data || data.length === 0) break;
+    all.push(...(data as unknown as CountRecord[]));
+    if (data.length < pageSize) break;
+  }
+  return all;
 }
 
 /** Baskin Robbins: Daily shift & Multi-Day periodic reconciliation report + Current inventory on hand. */
@@ -163,6 +196,7 @@ export function BRReport() {
   const [editModal, setEditModal] = useState<{
     item_id: string;
     flavour: string;
+    count_date: string;
     session: 'opening' | 'closing';
     unopened_boxes: number;
     open_box_gross: number;
@@ -182,14 +216,24 @@ export function BRReport() {
     }
   }, []);
 
-  const openEditModal = (item_id: string, flavour: string, session: 'opening' | 'closing') => {
-    const existing = countsForDate[item_id]?.[session] || { unopened_boxes: 0, open_box_gross: 0 };
+  const openEditModal = (
+    item_id: string,
+    flavour: string,
+    session: 'opening' | 'closing',
+    targetDate = date,
+    initialBoxes?: number,
+    initialGross?: number
+  ) => {
+    const existing = countsForDate[item_id]?.[session];
+    const unopened = initialBoxes !== undefined ? initialBoxes : (existing?.unopened_boxes || 0);
+    const gross = initialGross !== undefined ? initialGross : (existing?.open_box_gross || 0);
     setEditModal({
       item_id,
       flavour,
+      count_date: targetDate,
       session,
-      unopened_boxes: existing.unopened_boxes,
-      open_box_gross: existing.open_box_gross,
+      unopened_boxes: unopened,
+      open_box_gross: gross,
     });
   };
 
@@ -206,7 +250,7 @@ export function BRReport() {
       const { error } = await supabase.from('br_flavour_counts').upsert({
         store_id: store.id,
         item_id: editModal.item_id,
-        count_date: date,
+        count_date: editModal.count_date,
         session: editModal.session,
         unopened_boxes: unopened,
         open_box_gross: gross,
@@ -358,15 +402,14 @@ export function BRReport() {
       } else {
         // MULTI-DAY PERIOD RECONCILIATION (7d, 15d, 30d, custom)
         const [
-          { data: lines, error: linesErr },
+          counts,
           { data: salesSummaries },
           { data: deliveries },
           { data: wastages },
-          { data: flavourCounts },
           { data: flvRows },
           { data: recentCounts },
         ] = await Promise.all([
-          supabase.rpc('br_sales_lines', { p_store_id: store.id, p_from: activeFrom, p_to: activeTo }),
+          fetchAllFlavourCounts(supabase, store.id, addDays(activeFrom, -3), activeTo),
           supabase.from('daily_sales_summary')
             .select('entry_date, net_sales, has_summary, has_items, created_at')
             .eq('store_id', store.id)
@@ -376,18 +419,14 @@ export function BRReport() {
             .select('item_id, quantity, boxes, movement, entry_date')
             .eq('store_id', store.id)
             .gte('entry_date', activeFrom)
-            .lte('entry_date', activeTo),
+            .lte('entry_date', activeTo)
+            .limit(2000),
           supabase.from('daily_wastage_log')
             .select('item_id, quantity_wasted, entry_date')
             .eq('store_id', store.id)
             .gte('entry_date', activeFrom)
-            .lte('entry_date', activeTo),
-          supabase.from('br_flavour_counts')
-            .select('item_id, count_date, session, unopened_boxes, open_box_gross, grams, created_at, updated_at, staff_members(name)')
-            .eq('store_id', store.id)
-            .gte('count_date', addDays(activeFrom, -3))
-            .lte('count_date', activeTo)
-            .order('count_date', { ascending: true }),
+            .lte('entry_date', activeTo)
+            .limit(2000),
           supabase.from('items')
             .select('id, name, code, tasting_allowance_grams, item_categories!inner(brand_id, is_flavour, name, sort_order)')
             .eq('is_active', true)
@@ -398,17 +437,33 @@ export function BRReport() {
             .select('item_id, count_date, session, unopened_boxes, open_box_gross, grams, created_at, updated_at, staff_members(name)')
             .eq('store_id', store.id)
             .order('count_date', { ascending: false })
-            .limit(500),
+            .limit(1000),
         ]);
+
+        // Bound POS sales to the actual counted date window:
+        // - If activeFrom is before the store's earliest physical count, start from the earliest count date.
+        // - If activeTo has no closing counts yet (only opening counts), completed shift sales end on activeTo - 1.
+        const hasCountOnOrBeforeStart = counts.some(c => c.count_date <= activeFrom);
+        const earliestCountDate = counts.length > 0 ? counts[0].count_date : activeFrom;
+        const effectiveSalesFrom = hasCountOnOrBeforeStart ? activeFrom : (earliestCountDate > activeFrom ? earliestCountDate : activeFrom);
+
+        const hasClosingOnEnd = counts.some(c => c.count_date === activeTo && c.session === 'closing');
+        const effectiveSalesTo = hasClosingOnEnd || activeTo <= effectiveSalesFrom ? activeTo : addDays(activeTo, -1);
+
+        const { data: lines, error: linesErr } = await supabase.rpc('br_sales_lines', {
+          p_store_id: store.id,
+          p_from: effectiveSalesFrom,
+          p_to: effectiveSalesTo,
+        });
 
         if (linesErr) setError(linesErr.message);
 
         const salesLinesList = (lines || []) as unknown as Array<{ item_id: string | null; grams: number; matched_by: string }>;
         setUnmatched(salesLinesList.filter(l => l.matched_by === 'none' || l.matched_by === 'no_flavour').length);
 
-        const numDays = Math.max(1, Math.round((new Date(activeTo + 'T00:00:00Z').getTime() - new Date(activeFrom + 'T00:00:00Z').getTime()) / 86400000) + 1);
+        const numDays = Math.max(1, Math.round((new Date(effectiveSalesTo + 'T00:00:00Z').getTime() - new Date(effectiveSalesFrom + 'T00:00:00Z').getTime()) / 86400000) + 1);
 
-        const summaries = salesSummaries || [];
+        const summaries = (salesSummaries || []).filter(s => s.entry_date >= effectiveSalesFrom && s.entry_date <= effectiveSalesTo);
         const salesDaysCount = summaries.filter(s => s.has_items || Number(s.net_sales) > 0).length;
         const totalNetSales = summaries.reduce((t, s) => t + (Number(s.net_sales) || 0), 0);
         const hasAnySales = summaries.some(s => s.has_items);
@@ -422,7 +477,6 @@ export function BRReport() {
         };
 
         const flvItems = (flvRows || []) as unknown as FlvItem[];
-        const counts = (flavourCounts || []) as unknown as CountRecord[];
 
         let totReceivedGrams = 0;
         let totReceivedBoxes = 0;
@@ -431,17 +485,43 @@ export function BRReport() {
 
         const calculatedPeriodRows: BRPeriodReportRow[] = flvItems.map(f => {
           const itemCounts = counts.filter(c => c.item_id === f.id);
-          const startC = findStartCount(itemCounts, activeFrom);
-          const endC = findEndCount(itemCounts, activeTo);
+          const rawStartC = findStartCount(itemCounts, activeFrom);
+          const rawEndC = findEndCount(itemCounts, activeTo);
 
-          const delivs = (deliveries || []).filter(d => d.item_id === f.id);
+          // Determine the exact completed business-day window [effFrom, effTo] bounded by startC and endC:
+          // - An 'opening' count on day D is weighed BEFORE day D's deliveries/sales.
+          // - A 'closing' count on day D is weighed AFTER day D's deliveries/sales.
+          const effFrom = rawStartC
+            ? (rawStartC.session === 'opening' ? rawStartC.count_date : addDays(rawStartC.count_date, 1))
+            : activeFrom;
+          const effTo = rawEndC
+            ? (rawEndC.session === 'opening' ? addDays(rawEndC.count_date, -1) : rawEndC.count_date)
+            : activeTo;
+
+          const hasCompletedWindow = Boolean(rawStartC && rawEndC && effFrom <= effTo);
+          const startC = rawStartC;
+          const endC = hasCompletedWindow ? rawEndC : null;
+
+          const delivs = (deliveries || []).filter(d =>
+            d.item_id === f.id &&
+            (hasCompletedWindow
+              ? (d.entry_date >= effFrom && d.entry_date <= effTo)
+              : (d.entry_date >= activeFrom && d.entry_date <= activeTo))
+          );
           const receivedGrams = delivs.reduce((sum, d) => sum + (d.movement === 'transfer_out' ? -Number(d.quantity || 0) : Number(d.quantity || 0)), 0);
           const receivedBoxes = delivs.reduce((sum, d) => sum + (d.movement === 'transfer_out' ? -Number(d.boxes || 0) : Number(d.boxes || 0)), 0);
 
-          const wasts = (wastages || []).filter(w => w.item_id === f.id);
+          const wasts = (wastages || []).filter(w =>
+            w.item_id === f.id &&
+            (hasCompletedWindow
+              ? (w.entry_date >= effFrom && w.entry_date <= effTo)
+              : (w.entry_date >= activeFrom && w.entry_date <= activeTo))
+          );
           const wastedGrams = wasts.reduce((sum, w) => sum + Number(w.quantity_wasted || 0), 0);
 
-          const soldGrams = salesLinesList.filter(l => l.item_id === f.id).reduce((sum, l) => sum + Number(l.grams || 0), 0);
+          const soldGrams = hasCompletedWindow
+            ? salesLinesList.filter(l => l.item_id === f.id).reduce((sum, l) => sum + Number(l.grams || 0), 0)
+            : 0;
 
           totReceivedGrams += receivedGrams;
           totReceivedBoxes += receivedBoxes;
@@ -462,15 +542,20 @@ export function BRReport() {
           const isOver = isCounted && netShortage >= 50;
           const shortageGrams = isOver ? netShortage : 0;
 
-          const status: BRPeriodReportRow['status'] = !isCounted
-            ? 'NOT_COUNTED'
-            : !hasAnySales
-              ? 'NO_SALES'
-              : isOver
-                ? 'OVER'
-                : (gap ?? 0) < -allowance - 50
-                  ? 'CHECK'
-                  : 'OK';
+          const hasAnyActivity = (startGrams !== null && startGrams > 0) || (endGrams !== null && endGrams > 0) || receivedGrams > 0 || soldGrams > 0 || wastedGrams > 0;
+          const isNeverCountedBeforePeriod = itemCounts.every(c => c.count_date > activeTo);
+
+          const status: BRPeriodReportRow['status'] = (!hasAnyActivity && isNeverCountedBeforePeriod)
+            ? 'NOT_INTRODUCED'
+            : !isCounted
+              ? 'NOT_COUNTED'
+              : !hasAnySales
+                ? 'NO_SALES'
+                : isOver
+                  ? 'OVER'
+                  : (gap ?? 0) < -allowance - 50
+                    ? 'CHECK'
+                    : 'OK';
 
           return {
             item_id: f.id,
@@ -481,11 +566,15 @@ export function BRReport() {
             opening: startGrams,
             opening_date: startC?.count_date ?? null,
             opening_session: startC?.session ?? null,
+            opening_unopened_boxes: startC ? Number(startC.unopened_boxes) || 0 : 0,
+            opening_open_box_gross: startC ? Number(startC.open_box_gross) || 0 : 0,
             received: receivedGrams,
             received_boxes: receivedBoxes,
             closing: endGrams,
             closing_date: endC?.count_date ?? null,
             closing_session: endC?.session ?? null,
+            closing_unopened_boxes: endC ? Number(endC.unopened_boxes) || 0 : 0,
+            closing_open_box_gross: endC ? Number(endC.open_box_gross) || 0 : 0,
             used,
             sold: soldGrams,
             wasted: wastedGrams,
@@ -741,16 +830,27 @@ export function BRReport() {
                   <input type="date" className={styles.searchInput} value={customTo} max={activeShiftDate} onChange={e => e.target.value && setCustomTo(e.target.value)} />
                 </div>
               ) : (
-                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                  Ending on anchor date: <strong>{shortDate(date)}</strong> (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Ending on:</span>
                   <button
                     type="button"
-                    style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', cursor: 'pointer', textDecoration: 'underline', padding: 0, font: 'inherit' }}
+                    className={date === prevShiftDate ? styles.primaryButton : styles.secondaryButton}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+                    onClick={() => setDate(prevShiftDate)}
+                  >
+                    ⏮️ Yesterday
+                  </button>
+                  <button
+                    type="button"
+                    className={date === activeShiftDate ? styles.primaryButton : styles.secondaryButton}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
                     onClick={() => setDate(activeShiftDate)}
                   >
-                    reset to today
+                    📅 Today
                   </button>
-                  )
+                  <button className={styles.secondaryButton} style={{ padding: '0.3rem 0.6rem' }} onClick={() => setDate(d => addDays(d, -1))} title="Previous day">‹</button>
+                  <input type="date" className={styles.searchInput} value={date} max={activeShiftDate} onChange={e => e.target.value && setDate(e.target.value)} />
+                  <button className={styles.secondaryButton} style={{ padding: '0.3rem 0.6rem' }} onClick={() => setDate(d => addDays(d, 1))} disabled={date >= activeShiftDate} title="Next day">›</button>
                 </div>
               )}
 
@@ -1110,12 +1210,32 @@ export function BRReport() {
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{r.range_name}</div>
                         </td>
                         <td className={styles.alignRight}>
-                          <div style={{ fontWeight: 600 }}>{r.opening !== null ? grams(r.opening) : '—'}</div>
-                          {r.opening !== null && r.opening_date && (
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                              {shortDate(r.opening_date)} {r.opening_session === 'opening' ? '🌅' : '🌙'}
+                          <div className={styles.countCell}>
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{r.opening !== null ? grams(r.opening) : '—'}</div>
+                              {r.opening !== null && r.opening_date && (
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                                  {shortDate(r.opening_date)} {r.opening_session === 'opening' ? '🌅' : '🌙'}
+                                </div>
+                              )}
                             </div>
-                          )}
+                            {r.opening_date && (
+                              <button
+                                className={styles.editCellBtn}
+                                onClick={() => openEditModal(
+                                  r.item_id,
+                                  r.flavour,
+                                  (r.opening_session as 'opening' | 'closing') || 'opening',
+                                  r.opening_date!,
+                                  r.opening_unopened_boxes,
+                                  r.opening_open_box_gross
+                                )}
+                                title={`Edit opening count for ${r.flavour} on ${r.opening_date}`}
+                              >
+                                ✏️
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className={styles.alignRight}>
                           {r.received > 0 ? (
@@ -1136,12 +1256,32 @@ export function BRReport() {
                           {r.expected_closing !== null ? grams(r.expected_closing) : '—'}
                         </td>
                         <td className={styles.alignRight}>
-                          <div style={{ fontWeight: 600 }}>{r.closing !== null ? grams(r.closing) : '—'}</div>
-                          {r.closing !== null && r.closing_date && (
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                              {shortDate(r.closing_date)} {r.closing_session === 'closing' ? '🌙' : '🌅'}
+                          <div className={styles.countCell}>
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{r.closing !== null ? grams(r.closing) : '—'}</div>
+                              {r.closing !== null && r.closing_date && (
+                                <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                                  {shortDate(r.closing_date)} {r.closing_session === 'closing' ? '🌙' : '🌅'}
+                                </div>
+                              )}
                             </div>
-                          )}
+                            {r.closing_date && (
+                              <button
+                                className={styles.editCellBtn}
+                                onClick={() => openEditModal(
+                                  r.item_id,
+                                  r.flavour,
+                                  (r.closing_session as 'opening' | 'closing') || 'closing',
+                                  r.closing_date!,
+                                  r.closing_unopened_boxes,
+                                  r.closing_open_box_gross
+                                )}
+                                title={`Edit closing count for ${r.flavour} on ${r.closing_date}`}
+                              >
+                                ✏️
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className={styles.alignRight} style={{ fontWeight: 700, color: isOver ? 'var(--danger)' : undefined }}>
                           {signedGrams(r.gap)}
@@ -1257,7 +1397,7 @@ export function BRReport() {
               ✏️ Edit {editModal.session === 'opening' ? 'Opening' : 'Closing'} Count
             </h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
-              Flavour: <strong>{editModal.flavour}</strong> · Sales Day: <strong>{displayDate(date)}</strong>
+              Flavour: <strong>{editModal.flavour}</strong> · Date: <strong>{displayDate(editModal.count_date)}</strong>
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
