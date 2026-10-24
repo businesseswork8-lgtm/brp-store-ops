@@ -424,14 +424,18 @@ export function BRCount() {
                         Packed boxes
                         <input type="number" inputMode="numeric" min="0" step="1" className={styles.input}
                           value={b.unopened} placeholder="0" aria-label={`${f.name} packed boxes`}
-                          onChange={e => setEntry(f, 'unopened', e.target.value)}
+                          onChange={e => setEntry(f, 'unopened', e.target.value.replace(/[^0-9]/g, ''))}
+                          onWheel={e => e.currentTarget.blur()}
+                          onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                           onBlur={() => autoSaveItem(f)} />
                       </label>
                       <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem', color: 'var(--text-secondary)', flex: 1 }}>
                         Open box on scale (g, with box)
                         <input type="number" inputMode="decimal" min="0" className={styles.input}
                           value={b.openGross} placeholder="e.g. 1450" aria-label={`${f.name} open box weight with box`}
-                          onChange={e => setEntry(f, 'openGross', e.target.value)}
+                          onChange={e => setEntry(f, 'openGross', e.target.value.replace(/[^0-9]/g, ''))}
+                          onWheel={e => e.currentTarget.blur()}
+                          onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                           onBlur={() => autoSaveItem(f)} />
                       </label>
                     </div>

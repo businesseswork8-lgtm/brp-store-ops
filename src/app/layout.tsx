@@ -13,6 +13,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              // Pure number entry: prevent mouse wheel / trackpad scroll from sliding number inputs
+              document.addEventListener('wheel', function(e) {
+                if (document.activeElement && document.activeElement.tagName === 'INPUT' && document.activeElement.type === 'number') {
+                  document.activeElement.blur();
+                }
+              }, { passive: true });
+            `,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   )

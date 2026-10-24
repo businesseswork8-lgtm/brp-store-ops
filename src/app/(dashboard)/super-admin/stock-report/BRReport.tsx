@@ -1411,7 +1411,9 @@ export function BRReport() {
                   className={styles.searchInput}
                   style={{ width: '100%' }}
                   value={editModal.unopened_boxes}
-                  onChange={e => setEditModal({ ...editModal, unopened_boxes: parseInt(e.target.value, 10) || 0 })}
+                  onChange={e => setEditModal({ ...editModal, unopened_boxes: parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0 })}
+                  onWheel={e => e.currentTarget.blur()}
+                  onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                 />
               </div>
 
@@ -1426,7 +1428,9 @@ export function BRReport() {
                   className={styles.searchInput}
                   style={{ width: '100%' }}
                   value={editModal.open_box_gross}
-                  onChange={e => setEditModal({ ...editModal, open_box_gross: parseInt(e.target.value, 10) || 0 })}
+                  onChange={e => setEditModal({ ...editModal, open_box_gross: parseInt(e.target.value.replace(/[^0-9]/g, ''), 10) || 0 })}
+                  onWheel={e => e.currentTarget.blur()}
+                  onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem', display: 'block' }}>
                   Empty box tare of {EMPTY_BOX_GRAMS} g is deducted automatically.

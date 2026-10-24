@@ -248,11 +248,15 @@ function GeneralCount() {
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <input type="number" inputMode="numeric" min="0" step="1" className={styles.input} style={{ maxWidth: 130 }}
                             value={b.unopened} placeholder="Unopened boxes" aria-label={`${i.name} unopened boxes`}
-                            onChange={e => set('unopened', e.target.value)}
+                            onChange={e => set('unopened', e.target.value.replace(/[^0-9]/g, ''))}
+                            onWheel={e => e.currentTarget.blur()}
+                            onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                             onBlur={() => autoSaveSingle(i, undefined, b)} />
                           <input type="number" inputMode="decimal" min="0" className={styles.input}
                             value={b.openGross} placeholder="Open box on scale (g)" aria-label={`${i.name} open box weight`}
-                            onChange={e => set('openGross', e.target.value)}
+                            onChange={e => set('openGross', e.target.value.replace(/[^0-9]/g, ''))}
+                            onWheel={e => e.currentTarget.blur()}
+                            onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                             onBlur={() => autoSaveSingle(i, undefined, b)} />
                         </div>
                         {r && <div style={{ fontSize: '0.85rem', color: r.error ? 'var(--danger)' : 'var(--text-secondary)' }}>
@@ -264,6 +268,8 @@ function GeneralCount() {
                       value={values[i.id] ?? ''} placeholder={`Count in ${displayUnit(i.rista_unit, i.uom)}`}
                       aria-label={`${i.name} count`}
                       onChange={e => setValues(v => ({ ...v, [i.id]: e.target.value }))}
+                      onWheel={e => e.currentTarget.blur()}
+                      onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                       onBlur={() => autoSaveSingle(i, values[i.id])} />
                   )}
                   {!lastCount[i.id] && <div style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>First count for this item</div>}
