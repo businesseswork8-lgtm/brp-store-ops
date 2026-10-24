@@ -15,6 +15,7 @@ export type BRReportRow = {
   sold: number; wasted: number; gap: number | null; allowance: number;
   prev_closing: number | null; overnight_change: number | null;
   status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED' | 'NOT_INTRODUCED';
+  allowancePercent?: number;
 };
 
 export type BRPeriodReportRow = {
@@ -43,6 +44,8 @@ export type BRPeriodReportRow = {
   allowance: number;
   shortageGrams: number;
   status: 'OVER' | 'CHECK' | 'OK' | 'NO_SALES' | 'NOT_COUNTED' | 'NOT_INTRODUCED';
+  allowancePercent?: number;
+  gapPercent?: number | null;
 };
 
 export function boxesLabel(grams: number, fullBoxGrams = 2250): string {

@@ -16,6 +16,7 @@ type Flavour = {
   category_id: string;
   full_box_grams: number | null;
   tasting_allowance_grams: number;
+  allowance_percent?: number | null;
   tare_grams: number;
   rista_names: string;
 };
@@ -152,14 +153,29 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
     load();
   };
 
+  const getFlavourAllowancePct = (f: { allowance_percent?: number | null; tasting_allowance_grams?: number | null }): number => {
+    const p = Number(f.allowance_percent ?? f.tasting_allowance_grams ?? 0);
+    return p > 0 ? p : 5;
+  };
+
   const saveAllowance = async (f: Flavour) => {
     const raw = (allowEdits[f.id] ?? '').trim();
-    const g = raw === '' ? 0 : Number(raw);
-    if (isNaN(g) || g < 0) { notify('Tasting allowance must be 0 or more grams', false); return; }
-    const { error } = await supabase.from('items').update({ tasting_allowance_grams: g }).eq('id', f.id);
-    if (error) { notify('Could not save: ' + error.message, false); return; }
+    const pct = raw === '' ? 5 : Number(raw);
+    if (isNaN(pct) || pct < 0 || pct > 100) { notify('Allowance must be a valid percentage (0–100%)', false); return; }
+    
+    // Save to both allowance_percent and tasting_allowance_grams for backward/forward compatibility
+    const { error } = await supabase.from('items').update({
+      allowance_percent: pct,
+      tasting_allowance_grams: pct,
+    }).eq('id', f.id);
+
+    if (error) {
+      // If allowance_percent doesn't exist yet on DB, fallback to updating tasting_allowance_grams
+      const { error: err2 } = await supabase.from('items').update({ tasting_allowance_grams: pct }).eq('id', f.id);
+      if (err2) { notify('Could not save: ' + err2.message, false); return; }
+    }
     setAllowEdits(e => { const n = { ...e }; delete n[f.id]; return n; });
-    notify(`${f.name}: tasting allowance ${g} g a day`);
+    notify(`${f.name}: allowance set to ${pct}% of sales`);
     load();
   };
 
@@ -311,18 +327,27 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
                 <span className={styles.meta}>{f.code || ''}</span>
                 {canEdit ? (
                   <span className={styles.meta} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <input className={styles.search} style={{ width: 85, minWidth: 0, flex: 'none' }} type="number" min="0" placeholder="5% default"
-                      aria-label={`${f.name} tasting allowance grams`} title="Tasting allowance: set 0 to use default 5% of daily sales, or enter a custom fixed gram limit"
-                      value={allowEdits[f.id] ?? (Number(f.tasting_allowance_grams) > 0 ? String(f.tasting_allowance_grams) : '')}
+                    <input
+                      className={styles.search}
+                      style={{ width: 65, minWidth: 0, flex: 'none', textAlign: 'right' }}
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      placeholder="5"
+                      aria-label={`${f.name} allowance percentage`}
+                      title="Allowance %: standard is 5% of sales. Enter 10 for 10%, etc."
+                      value={allowEdits[f.id] ?? (getFlavourAllowancePct(f) !== 5 ? String(getFlavourAllowancePct(f)) : '')}
                       onChange={e => setAllowEdits(a => ({ ...a, [f.id]: e.target.value }))}
-                      onBlur={() => { if (allowEdits[f.id] !== undefined) saveAllowance(f); }} />
+                      onBlur={() => { if (allowEdits[f.id] !== undefined) saveAllowance(f); }}
+                    />
                     <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                      {Number(allowEdits[f.id] ?? f.tasting_allowance_grams) > 0 ? 'g fixed' : '(5% of sales)'}
+                      % {Number(allowEdits[f.id] ?? getFlavourAllowancePct(f)) === 5 && (allowEdits[f.id] === undefined || allowEdits[f.id] === '') ? '(default 5%)' : 'of sales'}
                     </span>
                   </span>
                 ) : (
                   <span className={styles.meta}>
-                    {Number(f.tasting_allowance_grams) > 0 ? `${f.tasting_allowance_grams} g tasting/day` : '5% of sales (default)'}
+                    {getFlavourAllowancePct(f)}% of sales {getFlavourAllowancePct(f) === 5 ? '(default)' : ''}
                   </span>
                 )}
                 {canEdit ? (
@@ -348,7 +373,7 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
         );
       })}
 
-      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>tasting (g/day)</strong> = allowance before the flavour shows as Over · <strong>Rista names</strong> = other names Rista uses for the flavour (e.g. &ldquo;vanilla&rdquo;). Changes save when you tap outside the box.</p>
+      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>allowance (%)</strong> = tasting and scooping allowance as % of POS sales (standard default is 5%, can be set to 10% or custom) · <strong>Rista names</strong> = other names Rista uses for the flavour (e.g. &ldquo;vanilla&rdquo;). Changes save when you tap outside the box.</p>
       </>}
 
       {tab === 'matching' && (

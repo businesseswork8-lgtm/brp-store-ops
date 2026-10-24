@@ -700,15 +700,15 @@ export default function EODReportPage() {
                   )}
                 </div>
                 <div style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                  {counted} of {brRows.length} bulk flavours weighed at opening and closing. 5% tasting allowance applied proportional to sales.
+                  {counted} of {brRows.length} bulk flavours weighed at opening and closing. Tasting allowance applied proportional to sales (5% standard, or custom per flavour).
                 </div>
                 {noSales ? (
                   <div style={{ color: 'var(--warning)' }}>⚠ Sales By Items not uploaded for {selectedDate} — flavours can&apos;t be checked yet.</div>
                 ) : counted === 0 ? null : bad.length === 0 ? (
-                  <div style={{ color: 'var(--success)' }}>✓ Every weighed flavour is within its 5% tasting allowance! (0 g shortage)</div>
+                  <div style={{ color: 'var(--success)' }}>✓ Every weighed flavour is within its tasting allowance! (0 g shortage)</div>
                 ) : (
                   <table className={styles.table}>
-                    <thead><tr><th>Flavour</th><th>Used</th><th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance (5%)</th><th>Shortage</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Flavour</th><th>Used</th><th>Sold</th><th>Wasted</th><th>Gap</th><th>Allowance</th><th>Shortage</th><th>Status</th></tr></thead>
                     <tbody>
                       {bad.map(r => {
                         const allow = effectiveAllow(r);

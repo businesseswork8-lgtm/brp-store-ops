@@ -138,6 +138,7 @@ export function BRReport() {
 
   // Single-day shift data
   const [rows, setRows] = useState<BRReportRow[]>([]);
+  const [flavourAllowMap, setFlavourAllowMap] = useState<Record<string, number>>({});
   // Multi-day period data
   const [periodRows, setPeriodRows] = useState<BRPeriodReportRow[]>([]);
   const [periodMeta, setPeriodMeta] = useState<{
@@ -291,7 +292,7 @@ export function BRReport() {
           supabase.rpc('br_daily_report', { p_store_id: store.id, p_date: date }),
           supabase.rpc('br_sales_lines', { p_store_id: store.id, p_from: date, p_to: date }),
           supabase.from('items')
-            .select('id, name, item_categories!inner(brand_id, is_flavour, name, sort_order)')
+            .select('id, name, tasting_allowance_grams, item_categories!inner(brand_id, is_flavour, name, sort_order)')
             .eq('is_active', true)
             .eq('item_categories.brand_id', store.brand_id)
             .eq('item_categories.is_flavour', true)
@@ -311,6 +312,14 @@ export function BRReport() {
             .eq('entry_date', date)
             .maybeSingle(),
         ]);
+
+        const allowMap: Record<string, number> = {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (flvRows || []).forEach((f: any) => {
+          const p = Number(f.allowance_percent ?? f.tasting_allowance_grams ?? 0);
+          allowMap[f.id] = p > 0 ? p : 5;
+        });
+        setFlavourAllowMap(allowMap);
 
         setError(e ? e.message : null);
         setRows(e ? [] : toReportRows(reportData));
@@ -473,6 +482,7 @@ export function BRReport() {
           name: string;
           code: string | null;
           tasting_allowance_grams?: number;
+          allowance_percent?: number;
           item_categories: { name: string; sort_order: number };
         };
 
@@ -536,8 +546,9 @@ export function BRReport() {
           const expected = startGrams !== null ? startGrams + receivedGrams - soldGrams - wastedGrams : null;
           const gap = used !== null ? used - soldGrams - wastedGrams : null;
 
-          const allowDaily = Number(f.tasting_allowance_grams || 0);
-          const allowance = allowDaily > 0 ? allowDaily * numDays : Math.round(soldGrams * 0.05);
+          const p = Number(f.allowance_percent ?? f.tasting_allowance_grams ?? 0);
+          const effectivePct = p > 0 ? p : 5;
+          const allowance = Math.round(soldGrams * (effectivePct / 100));
           const netShortage = (gap ?? 0) - allowance;
           const isOver = isCounted && netShortage >= 50;
           const shortageGrams = isOver ? netShortage : 0;
@@ -581,6 +592,8 @@ export function BRReport() {
             expected_closing: expected,
             gap,
             allowance,
+            allowancePercent: effectivePct,
+            gapPercent: soldGrams > 0 && gap !== null ? Math.round((gap / soldGrams) * 1000) / 10 : null,
             shortageGrams,
             status,
           };
@@ -646,9 +659,9 @@ export function BRReport() {
   useEffect(() => { load(); }, [load]);
 
   // Calculations for Single Day
-  const effectiveAllowance = (r: BRReportRow) => (r.allowance > 0 ? r.allowance : Math.round(r.sold * 0.05));
   const rowsWithCalc = rows.map(r => {
-    const allow = effectiveAllowance(r);
+    const pct = flavourAllowMap[r.item_id] ?? (r.allowancePercent || 5);
+    const allow = Math.round((r.sold || 0) * (pct / 100));
     const gap = r.gap ?? 0;
     const isCounted = r.opening !== null && r.closing !== null;
     const netShortage = gap - allow;
@@ -656,6 +669,7 @@ export function BRReport() {
     const shortageGrams = isOver ? netShortage : 0;
     return {
       ...r,
+      allowancePercent: pct,
       calculatedAllowance: allow,
       shortageGrams,
       computedStatus: (!isCounted ? 'NOT_COUNTED' : isOver ? 'OVER' : gap < -allow - 50 ? 'CHECK' : 'OK') as BRReportRow['status'],
@@ -928,7 +942,7 @@ export function BRReport() {
               </div>
 
               <div className={styles.statCard} style={{ borderLeft: `4px solid ${noSales1d ? 'var(--border-color)' : totalShortageGrams1d > 0 ? 'var(--danger)' : 'var(--success)'}` }}>
-                <div className={styles.statLabel}>⚖️ 4. Shift Shortage (After 5% Allowance)</div>
+                <div className={styles.statLabel}>⚖️ 4. Shift Shortage (After Allowance)</div>
                 <div className={styles.statValue} style={{ fontSize: '1.35rem', color: noSales1d ? 'var(--text-secondary)' : totalShortageGrams1d > 0 ? 'var(--danger)' : 'var(--success)' }}>
                   {noSales1d
                     ? 'Pending Sales'
@@ -942,8 +956,8 @@ export function BRReport() {
                   {noSales1d
                     ? 'Awaiting Sales By Items upload'
                     : over1d.length > 0
-                      ? `${over1d.length} flavour${over1d.length > 1 ? 's' : ''} over 5% allowance (${grams(totalAllowanceGrams1d)} allow.)`
-                      : `All flavours within 5% allowance (${grams(totalAllowanceGrams1d)})`}
+                      ? `${over1d.length} flavour${over1d.length > 1 ? 's' : ''} over allowance (${grams(totalAllowanceGrams1d)} allow.)`
+                      : `All flavours within allowance (${grams(totalAllowanceGrams1d)})`}
                 </div>
               </div>
             </div>
@@ -994,8 +1008,8 @@ export function BRReport() {
                   {!periodMeta.hasAnySales
                     ? 'Upload Sales By Items'
                     : overPeriod.length > 0
-                      ? `${overPeriod.length} flavour${overPeriod.length > 1 ? 's' : ''} over 5% allowance (${grams(totalAllowanceGramsPeriod)} allow.)`
-                      : `All flavours within 5% allowance (${grams(totalAllowanceGramsPeriod)})`}
+                      ? `${overPeriod.length} flavour${overPeriod.length > 1 ? 's' : ''} over allowance (${grams(totalAllowanceGramsPeriod)} allow.)`
+                      : `All flavours within allowance (${grams(totalAllowanceGramsPeriod)})`}
                 </div>
               </div>
             </div>
@@ -1010,7 +1024,7 @@ export function BRReport() {
                     🚨 {period === '1d' ? 'Shift Shortage Bifurcation' : `Cumulative ${periodMeta.totalDays}-Day Shortage Bifurcation`} ({grams(period === '1d' ? totalShortageGrams1d : totalShortageGramsPeriod)} total)
                   </h3>
                   <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    Consumption exceeded POS sales + 5% tasting allowance. Ranked by highest loss (grams &amp; kg):
+                    Consumption exceeded POS sales + tasting allowance. Ranked by highest loss (grams &amp; kg):
                   </p>
                 </div>
               </div>
@@ -1022,7 +1036,7 @@ export function BRReport() {
                       <th className={styles.stickyCol}>Flavour</th>
                       <th className={styles.alignRight}>Used from Tub</th>
                       <th className={styles.alignRight}>Sold (POS)</th>
-                      <th className={styles.alignRight}>5% Allowance</th>
+                      <th className={styles.alignRight}>Allowance</th>
                       <th className={styles.alignRight}>Wasted</th>
                       <th className={styles.alignRight}>Shortage (g)</th>
                       <th className={styles.alignRight}>Shortage (kg)</th>
@@ -1038,7 +1052,12 @@ export function BRReport() {
                         </td>
                         <td className={styles.alignRight}>{grams(r.used)}</td>
                         <td className={styles.alignRight}>{grams(r.sold)}</td>
-                        <td className={styles.alignRight}>{grams('calculatedAllowance' in r ? r.calculatedAllowance : r.allowance)}</td>
+                        <td className={styles.alignRight}>
+                          <div style={{ fontWeight: 600 }}>{grams('calculatedAllowance' in r ? r.calculatedAllowance : r.allowance)}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                            {r.allowancePercent ?? 5}% of sales
+                          </div>
+                        </td>
                         <td className={styles.alignRight}>{r.wasted ? grams(r.wasted) : '—'}</td>
                         <td className={styles.alignRight} style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.05rem' }}>
                           +{grams(r.shortageGrams)}
@@ -1122,7 +1141,7 @@ export function BRReport() {
                     <th className={styles.alignRight}>Sold (POS)</th>
                     <th className={styles.alignRight}>Wasted</th>
                     <th className={styles.alignRight}>Gap</th>
-                    <th className={styles.alignRight}>Allowance (5%)</th>
+                    <th className={styles.alignRight}>Allowance</th>
                     <th className={styles.alignRight}>Overnight</th>
                     <th className={styles.alignCenter}>Status</th>
                   </tr>
@@ -1168,7 +1187,12 @@ export function BRReport() {
                         <td className={styles.alignRight} style={{ fontWeight: 600, color: isOver ? 'var(--danger)' : undefined }}>
                           {signedGrams(r.gap)}
                         </td>
-                        <td className={styles.alignRight}>{grams(r.calculatedAllowance)}</td>
+                        <td className={styles.alignRight}>
+                          <div style={{ fontWeight: 600 }}>{grams(r.calculatedAllowance)}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                            {r.allowancePercent ?? 5}% of sales
+                          </div>
+                        </td>
                         <td className={styles.alignRight} style={{ color: (r.overnight_change ?? 0) < -50 ? 'var(--warning)' : undefined }}>
                           {signedGrams(r.overnight_change)}
                         </td>
@@ -1195,7 +1219,7 @@ export function BRReport() {
                     <th className={styles.alignRight}>Expected</th>
                     <th className={styles.alignRight}>Actual Closing</th>
                     <th className={styles.alignRight}>Gap (Shortage)</th>
-                    <th className={styles.alignRight}>Allowance (5%)</th>
+                    <th className={styles.alignRight}>Allowance</th>
                     <th className={styles.alignCenter}>Status</th>
                   </tr>
                 </thead>
@@ -1284,9 +1308,26 @@ export function BRReport() {
                           </div>
                         </td>
                         <td className={styles.alignRight} style={{ fontWeight: 700, color: isOver ? 'var(--danger)' : undefined }}>
-                          {signedGrams(r.gap)}
+                          <div>{signedGrams(r.gap)}</div>
+                          {r.sold > 0 && r.gap !== null && (
+                            <div
+                              style={{
+                                fontSize: '0.7rem',
+                                fontWeight: 500,
+                                color: (r.gap - (r.allowance ?? 0)) >= 50 ? 'var(--danger)' : 'var(--text-secondary)',
+                              }}
+                              title="Historical gap as % of POS sales across this period"
+                            >
+                              {r.gap > 0 ? '+' : ''}{(Math.round((r.gap / r.sold) * 1000) / 10).toFixed(1)}% gap
+                            </div>
+                          )}
                         </td>
-                        <td className={styles.alignRight}>{grams(r.allowance)}</td>
+                        <td className={styles.alignRight}>
+                          <div style={{ fontWeight: 600 }}>{grams(r.allowance)}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                            {r.allowancePercent ?? 5}% of sales
+                          </div>
+                        </td>
                         <td className={styles.alignCenter}>
                           <span className={styles[st.cls]} title={st.help}>{st.label}</span>
                         </td>

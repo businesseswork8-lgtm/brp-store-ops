@@ -7,6 +7,12 @@
   --brand-br: #e91e8c;
   --brand-br-light: #ff4da6;
   
+  /* Accent Colors (aliases for Brand theme) */
+  --accent-primary: #ff6b35;
+  --accent-primary-hover: #ff8c42;
+  --accent-secondary: #e91e8c;
+  --accent-secondary-hover: #ff4da6;
+
   /* Status Colors */
   --status-success: #00c853;
   --status-success-bg: rgba(0, 200, 83, 0.1);
@@ -17,10 +23,18 @@
   --status-info: #2979ff;
   --status-info-bg: rgba(41, 121, 255, 0.1);
 
+  /* Status Aliases */
+  --success: #00c853;
+  --warning: #ffd600;
+  --danger: #ff1744;
+  --info: #2979ff;
+
   /* Dark Theme Backgrounds */
   --bg-main: #0a0a0f;
   --bg-secondary: #12121a;
   --bg-tertiary: #1a1a2e;
+  --bg-card: rgba(255, 255, 255, 0.04);
+  --bg-card-hover: rgba(255, 255, 255, 0.07);
   
   /* Glassmorphism */
   --glass-bg: rgba(26, 26, 46, 0.6);

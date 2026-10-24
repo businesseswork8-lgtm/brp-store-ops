@@ -17,6 +17,12 @@ type StoreRow = {
   morningCashTime: string | null;
   eveningCash: number | null;
   eveningCashTime: string | null;
+  posCashSales: number | null;
+  cashExpenses: number;
+  cashDeposits: number;
+  expectedCash: number | null;
+  cashDiff: number | null;
+  cashStatus: 'MATCH' | 'SHORT' | 'EXTRA' | 'PENDING';
   due: number;
   counted: number;
   countedTime: string | null;
@@ -81,15 +87,17 @@ export default function AllStoresPage() {
         { data: items },
         { data: counts },
         { data: report },
+        { data: cashTxs },
       ] = await Promise.all([
         supabase.from('daily_cash_tally').select('tally_type, total_amount, created_at').eq('store_id', st.id).eq('entry_date', selectedDate),
-        supabase.from('daily_sales_summary').select('net_sales, has_summary, has_items, created_at').eq('store_id', st.id).eq('entry_date', selectedDate).maybeSingle(),
+        supabase.from('daily_sales_summary').select('net_sales, cash_amount, has_summary, has_items, created_at').eq('store_id', st.id).eq('entry_date', selectedDate).maybeSingle(),
         supabase.from('rista_consumption_uploads').select('id, created_at').eq('store_id', st.id).lte('date_from', selectedDate).gte('date_to', selectedDate).order('created_at', { ascending: false }).limit(1),
         supabase.from('items').select('id, count_frequency, item_categories!inner(brand_id)')
           .eq('is_active', true).eq('item_categories.brand_id', st.brand_id).neq('count_frequency', 'none'),
         supabase.from('stock_counts').select('item_id, count_date, created_at, updated_at').eq('store_id', st.id)
           .lte('count_date', selectedDate).gte('count_date', addDays(selectedDate, -62)).order('count_date', { ascending: false }).limit(5000),
         supabase.rpc('stock_variance_report', { p_store_id: st.id, p_from: null, p_to: selectedDate }),
+        supabase.from('daily_cash_transactions').select('tx_type, amount').eq('store_id', st.id).eq('entry_date', selectedDate),
       ]);
 
       let br: StoreRow['br'];
@@ -170,16 +178,41 @@ export default function AllStoresPage() {
       const okRows = rep.filter(r => RELIABLE.has(r.status));
       const mCash = cash?.find(c => c.tally_type === 'morning');
       const eCash = cash?.find(c => c.tally_type === 'evening');
+      const morningAmt = mCash ? Number(mCash.total_amount) : null;
+      const eveningAmt = eCash ? Number(eCash.total_amount) : null;
+      const posCashAmt = sales && sales.cash_amount !== null && sales.cash_amount !== undefined ? Number(sales.cash_amount) : null;
+      const expTotal = (cashTxs || []).filter(t => t.tx_type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const depTotal = (cashTxs || []).filter(t => t.tx_type === 'bank_deposit').reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+      const expectedEveningCash = morningAmt !== null && posCashAmt !== null
+        ? morningAmt + posCashAmt - expTotal - depTotal
+        : null;
+      const cashDiff = expectedEveningCash !== null && eveningAmt !== null
+        ? eveningAmt - expectedEveningCash
+        : null;
+
+      let cashStatus: StoreRow['cashStatus'] = 'PENDING';
+      if (cashDiff !== null) {
+        if (Math.abs(cashDiff) < 1) cashStatus = 'MATCH';
+        else if (cashDiff < 0) cashStatus = 'SHORT';
+        else cashStatus = 'EXTRA';
+      }
 
       return {
         id: st.id,
         name: st.name,
         brand: (st as unknown as { brands?: { name: string } }).brands?.name || '',
         is_active: Boolean(st.is_active),
-        morningCash: mCash ? Number(mCash.total_amount) : null,
+        morningCash: morningAmt,
         morningCashTime: mCash?.created_at ? formatDateTime(mCash.created_at) : null,
-        eveningCash: eCash ? Number(eCash.total_amount) : null,
+        eveningCash: eveningAmt,
         eveningCashTime: eCash?.created_at ? formatDateTime(eCash.created_at) : null,
+        posCashSales: posCashAmt,
+        cashExpenses: expTotal,
+        cashDeposits: depTotal,
+        expectedCash: expectedEveningCash,
+        cashDiff,
+        cashStatus,
         due: due.length,
         counted: due.filter(i => last[i.id] === selectedDate).length,
         countedTime: latestCountIso ? formatDateTime(latestCountIso) : null,
@@ -219,6 +252,8 @@ export default function AllStoresPage() {
 
   const totalSales = visibleRows.reduce((t, r) => t + (r.netSales || 0), 0);
   const totalShort = visibleRows.reduce((t, r) => t + (r.br ? 0 : r.short), 0);
+  const totalCashShort = visibleRows.reduce((t, r) => t + (r.cashDiff !== null && r.cashDiff < -0.99 ? r.cashDiff : 0), 0);
+  const storesWithCashShort = visibleRows.filter(r => r.cashDiff !== null && r.cashDiff < -0.99).length;
   const ok = (b: boolean) => <span className={b ? styles.badgeSuccess : styles.badgeDefault}>{b ? '✓' : 'Pending'}</span>;
 
   const selectStoreInStorage = (storeId: string) => {
@@ -384,6 +419,12 @@ export default function AllStoresPage() {
                 {inr(totalShort)}
               </div>
             </div>
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Cash Shortage ({shortDate(selectedDate)})</div>
+              <div className={styles.statValue} style={{ color: totalCashShort < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                {totalCashShort < 0 ? `-${inr(Math.abs(totalCashShort))} (${storesWithCashShort} st)` : '✓ ₹0 Short'}
+              </div>
+            </div>
           </div>
 
           <div className={styles.card} style={{ overflowX: 'auto' }}>
@@ -450,6 +491,39 @@ export default function AllStoresPage() {
                             </span>
                           ) : <span className={styles.badgeDefault}>Pending</span>}
                         </div>
+                        {r.cashStatus === 'MATCH' && (
+                          <div>
+                            <span className={styles.badgeSuccess} title={`Counted: ${inr(r.eveningCash!)}, Expected: ${inr(r.expectedCash!)}`}>
+                              ✓ Cash matched
+                            </span>
+                          </div>
+                        )}
+                        {r.cashStatus === 'SHORT' && r.cashDiff !== null && (
+                          <div>
+                            <Link
+                              href={`/store/cash-tally?date=${selectedDate}`}
+                              onClick={() => selectStoreInStorage(r.id)}
+                              className={styles.badgeDanger}
+                              style={{ textDecoration: 'none' }}
+                              title={`Counted: ${inr(r.eveningCash!)}, Expected: ${inr(r.expectedCash!)} (Short by ${inr(Math.abs(r.cashDiff))})`}
+                            >
+                              ⚠ Cash Short: -{inr(Math.abs(r.cashDiff))}
+                            </Link>
+                          </div>
+                        )}
+                        {r.cashStatus === 'EXTRA' && r.cashDiff !== null && (
+                          <div>
+                            <Link
+                              href={`/store/cash-tally?date=${selectedDate}`}
+                              onClick={() => selectStoreInStorage(r.id)}
+                              className={styles.badgeWarning}
+                              style={{ textDecoration: 'none' }}
+                              title={`Counted: ${inr(r.eveningCash!)}, Expected: ${inr(r.expectedCash!)} (Extra by ${inr(r.cashDiff)})`}
+                            >
+                              Extra Cash: +{inr(r.cashDiff)}
+                            </Link>
+                          </div>
+                        )}
                         {r.br ? (
                           <div>
                             🍨 Weigh: {r.br.closed >= r.br.flavours && r.br.flavours > 0 ? (
@@ -528,11 +602,40 @@ export default function AllStoresPage() {
                           )}
                         </div>
                       )}
+                      {r.cashStatus === 'SHORT' && r.cashDiff !== null && (
+                        <div style={{ marginTop: '0.35rem' }}>
+                          <Link
+                            href={`/store/cash-tally?date=${selectedDate}`}
+                            onClick={() => selectStoreInStorage(r.id)}
+                            className={styles.badgeDanger}
+                            style={{ textDecoration: 'none', display: 'inline-block' }}
+                            title="Click to view denomination count and shift expenses"
+                          >
+                            💵 Cash: -{inr(Math.abs(r.cashDiff))}
+                          </Link>
+                        </div>
+                      )}
+                      {r.cashStatus === 'MATCH' && (
+                        <div style={{ marginTop: '0.35rem' }}>
+                          <span className={styles.badgeSuccess} style={{ fontSize: '0.74rem' }}>
+                            ✓ Cash OK
+                          </span>
+                        </div>
+                      )}
                     </td>
 
                     {/* QUICK ACTIONS */}
                     <td>
                       <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <Link
+                          href={`/store/cash-tally?date=${selectedDate}`}
+                          className={styles.secondaryButton}
+                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', textDecoration: 'none' }}
+                          onClick={() => selectStoreInStorage(r.id)}
+                          title="View or edit cash drawer & expenses"
+                        >
+                          💰 Cash
+                        </Link>
                         <Link
                           href={`/super-admin/stock-report?date=${selectedDate}`}
                           className={styles.primaryButton}
