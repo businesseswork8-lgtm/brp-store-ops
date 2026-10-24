@@ -681,7 +681,7 @@ export default function EODReportPage() {
             const bad = brRows.filter(r => {
               const allow = effectiveAllow(r);
               const gap = r.gap ?? 0;
-              return r.opening !== null && r.closing !== null && (gap > allow || gap < -allow);
+              return r.opening !== null && r.closing !== null && gap > allow;
             });
             const totalShortage = brRows.reduce((sum, r) => {
               const allow = effectiveAllow(r);

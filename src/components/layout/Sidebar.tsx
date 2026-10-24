@@ -29,9 +29,9 @@ const storeLinks: NavLink[] = [
 // Owner / Admin overview screens
 const overviewLinks: NavLink[] = [
   { href: '/super-admin', label: 'All Stores', icon: '🏬' },
-  { href: '/super-admin/stock-report', label: 'Stock Report', icon: '📊' },
   daySummaryLink,
   { href: '/analytics/sales', label: 'Sales', icon: '💹', also: ['/analytics/trends'] },
+  { href: '/super-admin/stock-report', label: 'Stock Report', icon: '📊' },
 ];
 const itemsLink: NavLink = { href: '/super-admin/items', label: 'Items & Products', icon: '🧾', also: ['/super-admin/flavours'] };
 const usersLink: NavLink = { href: '/super-admin/users', label: 'Staff & Logins', icon: '👤' };
