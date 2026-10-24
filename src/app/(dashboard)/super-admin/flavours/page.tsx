@@ -373,7 +373,7 @@ export default function FlavoursPage({ initialTab }: { initialTab?: Tab }) {
         );
       })}
 
-      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>allowance (%)</strong> = tasting and scooping allowance as % of POS sales (standard default is 5%, can be set to 10% or custom) · <strong>Rista names</strong> = other names Rista uses for the flavour (e.g. &ldquo;vanilla&rdquo;). Changes save when you tap outside the box.</p>
+      <p className={styles.subtitle}>Each row: <strong>full box (g)</strong> = grams of ice cream in one sealed bulk box · <strong>allowance (%)</strong> = scooping allowance as % of POS sales (standard default is 5%, can be set to 10% or custom; daily tallies automatically apply a 20 g base buffer for customer tastings &amp; evening door thaw) · <strong>Rista names</strong> = other names Rista uses for the flavour (e.g. &ldquo;vanilla&rdquo;). Changes save when you tap outside the box.</p>
       </>}
 
       {tab === 'matching' && (

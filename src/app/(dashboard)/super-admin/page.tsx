@@ -137,7 +137,7 @@ export default function AllStoresPage() {
         let totalShortageGrams = 0;
         rep.forEach(r => {
           const isCounted = r.opening !== null && r.closing !== null;
-          const allow = Number(r.allowance) > 0 ? Number(r.allowance) : Math.round(Number(r.sold || 0) * 0.05);
+          const allow = Math.max(20, Number(r.allowance) > 0 ? Number(r.allowance) : Math.round(Number(r.sold || 0) * 0.05));
           const gap = Number(r.gap || 0);
           const netShortage = gap - allow;
           if (isCounted && netShortage >= 50) {

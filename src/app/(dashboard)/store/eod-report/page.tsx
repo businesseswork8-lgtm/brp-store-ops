@@ -676,7 +676,7 @@ export default function EODReportPage() {
 
           {/* Section 3 (Baskin Robbins): ice cream per flavour */}
           {brRows && (() => {
-            const effectiveAllow = (r: BRReportRow) => (r.allowance > 0 ? r.allowance : Math.round(r.sold * 0.05));
+            const effectiveAllow = (r: BRReportRow) => Math.max(20, r.allowance > 0 ? r.allowance : Math.round(r.sold * 0.05));
             const counted = brRows.filter(r => r.opening !== null && r.closing !== null).length;
             const bad = brRows.filter(r => {
               const allow = effectiveAllow(r);
@@ -700,7 +700,7 @@ export default function EODReportPage() {
                   )}
                 </div>
                 <div style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-                  {counted} of {brRows.length} bulk flavours weighed at opening and closing. Tasting allowance applied proportional to sales (5% standard, or custom per flavour).
+                  {counted} of {brRows.length} bulk flavours weighed at opening and closing. Tasting &amp; thaw allowance applied (minimum 20 g base or 5% of sales, custom per flavour).
                 </div>
                 {noSales ? (
                   <div style={{ color: 'var(--warning)' }}>⚠ Sales By Items not uploaded for {selectedDate} — flavours can&apos;t be checked yet.</div>

@@ -548,7 +548,17 @@ export function BRReport() {
 
           const p = Number(f.allowance_percent ?? f.tasting_allowance_grams ?? 0);
           const effectivePct = p > 0 ? p : 5;
-          const allowance = Math.round(soldGrams * (effectivePct / 100));
+          const salesAllow = Math.round(soldGrams * (effectivePct / 100));
+          // Multi-day base floor for low/zero sales (tasting spoons + evening door thaw):
+          // Day 1 = 20g, Day 7 = 40g, Day 15 = 60g, Day 30 = 80g
+          const baseFloor = numDays <= 1
+            ? 20
+            : numDays <= 7
+              ? Math.round(20 + ((numDays - 1) * (20 / 6)))
+              : numDays <= 15
+                ? Math.round(40 + ((numDays - 7) * (20 / 8)))
+                : Math.round(60 + Math.min(20, (numDays - 15) * 1.33));
+          const allowance = Math.max(baseFloor, salesAllow);
           const netShortage = (gap ?? 0) - allowance;
           const isOver = isCounted && netShortage >= 50;
           const shortageGrams = isOver ? netShortage : 0;
@@ -661,7 +671,9 @@ export function BRReport() {
   // Calculations for Single Day
   const rowsWithCalc = rows.map(r => {
     const pct = flavourAllowMap[r.item_id] ?? (r.allowancePercent || 5);
-    const allow = Math.round((r.sold || 0) * (pct / 100));
+    const salesAllow = Math.round((r.sold || 0) * (pct / 100));
+    // 20g daily base floor for customer sample spoons (5-10g) & evening softening/scale shift (10-15g)
+    const allow = Math.max(20, salesAllow);
     const gap = r.gap ?? 0;
     const isCounted = r.opening !== null && r.closing !== null;
     const netShortage = gap - allow;
@@ -1055,7 +1067,9 @@ export function BRReport() {
                         <td className={styles.alignRight}>
                           <div style={{ fontWeight: 600 }}>{grams('calculatedAllowance' in r ? r.calculatedAllowance : r.allowance)}</div>
                           <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                            {r.allowancePercent ?? 5}% of sales
+                            {(('calculatedAllowance' in r ? r.calculatedAllowance : r.allowance) ?? 0) > Math.round((r.sold || 0) * ((r.allowancePercent ?? 5) / 100))
+                              ? 'Base buffer (tasting & thaw)'
+                              : `${r.allowancePercent ?? 5}% of sales`}
                           </div>
                         </td>
                         <td className={styles.alignRight}>{r.wasted ? grams(r.wasted) : '—'}</td>
@@ -1190,7 +1204,9 @@ export function BRReport() {
                         <td className={styles.alignRight}>
                           <div style={{ fontWeight: 600 }}>{grams(r.calculatedAllowance)}</div>
                           <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                            {r.allowancePercent ?? 5}% of sales
+                            {r.calculatedAllowance > Math.round((r.sold || 0) * ((r.allowancePercent ?? 5) / 100))
+                              ? '20 g base (tasting & thaw)'
+                              : `${r.allowancePercent ?? 5}% of sales`}
                           </div>
                         </td>
                         <td className={styles.alignRight} style={{ color: (r.overnight_change ?? 0) < -50 ? 'var(--warning)' : undefined }}>
@@ -1325,7 +1341,9 @@ export function BRReport() {
                         <td className={styles.alignRight}>
                           <div style={{ fontWeight: 600 }}>{grams(r.allowance)}</div>
                           <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                            {r.allowancePercent ?? 5}% of sales
+                            {r.allowance > Math.round(r.sold * ((r.allowancePercent ?? 5) / 100))
+                              ? `${grams(r.allowance)} base (tasting & thaw)`
+                              : `${r.allowancePercent ?? 5}% of sales`}
                           </div>
                         </td>
                         <td className={styles.alignCenter}>

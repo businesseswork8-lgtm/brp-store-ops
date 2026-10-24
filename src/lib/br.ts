@@ -65,7 +65,7 @@ export type BRSalesLine = {
 };
 
 export const BR_STATUS: Record<BRReportRow['status'], { label: string; cls: 'badgeDanger' | 'badgeSuccess' | 'badgeDefault' | 'badgeWarning'; help: string }> = {
-  OVER: { label: '⚠ OVER LIMIT', cls: 'badgeDanger', help: 'More ice cream gone than sales + wastage + tasting allowance explain.' },
+  OVER: { label: '⚠ OVER LIMIT', cls: 'badgeDanger', help: 'More ice cream gone than sales + wastage + tasting & thaw allowance explain.' },
   CHECK: { label: '🔍 CHECK GAIN', cls: 'badgeWarning', help: 'More ice cream left than expected — miscount, or a delivery not entered?' },
   OK: { label: '✓ OK', cls: 'badgeSuccess', help: 'Within allowance.' },
   NO_SALES: { label: '📊 Pending Sales', cls: 'badgeDefault', help: 'Sales By Items not uploaded for this day.' },
