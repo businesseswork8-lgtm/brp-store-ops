@@ -29,6 +29,7 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
   const [lines, setLines] = useState<BRSalesLine[]>([]);
   const [linesErr, setLinesErr] = useState<string | null>(null);
   const [view, setView] = useState<'none' | 'matched' | 'skipped' | 'all'>('none');
+  const [search, setSearch] = useState('');
   const [skipWords, setSkipWords] = useState<string | null>(null);
   const [skipEdit, setSkipEdit] = useState<string | null>(null);
   const [pick, setPick] = useState<Record<string, { item: string; size: string }>>({});
@@ -147,8 +148,26 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
     skipped: (l: BRSalesLine) => ['skipped', 'ignored', 'no_flavour'].includes(l.matched_by),
     all: () => true,
   };
-  const shownLines = lines.filter(VIEWS[view]);
+
+  const query = search.trim().toLowerCase();
+  const matchesSearch = (l: BRSalesLine) => {
+    if (!query) return true;
+    const tokens = query.split(/\s+/).filter(Boolean);
+    const haystack = [
+      l.item_name,
+      l.variant,
+      l.category,
+      l.item_type,
+      l.flavour_name,
+      l.size_name,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return tokens.every(tok => haystack.includes(tok));
+  };
+
+  const viewLines = lines.filter(VIEWS[view]);
+  const shownLines = viewLines.filter(matchesSearch);
   const countOf = (v: keyof typeof VIEWS) => lines.filter(VIEWS[v]).length;
+  const countMatchesInAll = lines.filter(matchesSearch).length;
   const activeSizes = sizes.filter(z => z.is_active);
 
   return (
@@ -244,10 +263,73 @@ export function BRSettings({ canEdit, flavours, part, onChanged, currentTares }:
             <option value="skipped">Not counted: packs, cones, other items ({countOf('skipped')})</option>
             <option value="all">Everything ({lines.length})</option>
           </select>
+          <div style={{ position: 'relative', flex: 1, minWidth: 220, display: 'flex', alignItems: 'center' }}>
+            <input
+              type="text"
+              className={styles.search}
+              style={{ width: '100%', paddingRight: search ? '2.2rem' : undefined }}
+              placeholder="Search Rista line, flavour, size, category…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                style={{
+                  position: 'absolute',
+                  right: '0.6rem',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  padding: '0.2rem',
+                  lineHeight: 1,
+                }}
+                title="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
+        {query && shownLines.length > 0 && (
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+            Showing {shownLines.length} of {viewLines.length} lines matching &ldquo;{search}&rdquo;
+            {view !== 'all' && countMatchesInAll > shownLines.length && (
+              <span> ({countMatchesInAll} found across all lines &mdash; <button type="button" className={styles.secondary} style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', marginLeft: '0.3rem' }} onClick={() => setView('all')}>Show all</button>)</span>
+            )}
+          </div>
+        )}
         {linesErr && <div className={styles.notice}>Could not load sales lines: {linesErr}</div>}
         {!linesErr && lines.length === 0 && <p className={styles.subtitle}>No Sales By Items uploaded for this store in the last 45 days.</p>}
-        {!linesErr && lines.length > 0 && shownLines.length === 0 && <p className={styles.subtitle}>{view === 'none' ? '✅ Nothing needs you.' : 'No lines here.'}</p>}
+        {!linesErr && lines.length > 0 && shownLines.length === 0 && (
+          <p className={styles.subtitle}>
+            {query ? (
+              <>
+                No lines matching &ldquo;{search}&rdquo; in {view === 'all' ? 'Everything' : view === 'none' ? 'Needs you' : view === 'matched' ? 'Counted' : 'Not counted'}.
+                {view !== 'all' && countMatchesInAll > 0 && (
+                  <>
+                    {' '}(Found {countMatchesInAll} in other categories &mdash;{' '}
+                    <button
+                      type="button"
+                      className={styles.secondary}
+                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem', marginLeft: '0.25rem' }}
+                      onClick={() => setView('all')}
+                    >
+                      Show in Everything
+                    </button>)
+                  </>
+                )}
+              </>
+            ) : view === 'none' ? (
+              '✅ Nothing needs you.'
+            ) : (
+              'No lines here.'
+            )}
+          </p>
+        )}
         {shownLines.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
