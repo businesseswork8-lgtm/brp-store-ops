@@ -29,21 +29,27 @@ export const boxEntryEmpty = (e: BoxEntry) => e.unopened.trim() === '' && e.open
  * Net grams of ice cream, or an error message staff can act on.
  * An empty entry is NOT allowed (staff enter 0 boxes if none).
  */
-export function boxNet(item: BoxItem, e: BoxEntry): { grams: number | null; error: string | null } {
+export function boxNet(item: BoxItem, e: BoxEntry): { grams: number | null; grossGrams?: number; error: string | null } {
   if (boxEntryEmpty(e)) return { grams: null, error: null };
   const unopened = e.unopened.trim() === '' ? 0 : Number(e.unopened);
-  const gross = e.openGross.trim() === '' ? 0 : Number(e.openGross);
+  let gross = e.openGross.trim() === '' ? 0 : Number(e.openGross);
   if (!Number.isInteger(unopened) || unopened < 0) return { grams: null, error: `${item.name}: packed boxes must be a whole number` };
   if (isNaN(gross) || gross < 0) return { grams: null, error: `${item.name}: check the open box weight` };
+
+  // Smart conversion: if staff entered kg (e.g. 1.45, 0.85, 1.2), convert to grams (1450g, 850g, 1200g)
+  if (gross > 0 && gross <= 3.0) {
+    gross = Math.round(gross * 1000);
+  }
+
   if (gross > 0 && gross < EMPTY_BOX_GRAMS) {
-    return { grams: null, error: `${item.name}: open box weighs less than an empty box (${EMPTY_BOX_GRAMS} g)` };
+    return { grams: null, error: `${item.name}: open box weighs less than an empty box (${EMPTY_BOX_GRAMS} g). Enter in grams (e.g. 1450) or kg (e.g. 1.45)` };
   }
   // Allow factory overspill capped at 2500g gross (2250g nominal + 130g tare + 120g max overspill)
   if (gross > MAX_OPEN_BOX_GROSS_GRAMS) {
     return { grams: null, error: `${item.name}: open box weight (${gross} g) exceeds maximum allowed (max ${MAX_OPEN_BOX_GROSS_GRAMS} g)` };
   }
   const openNet = gross > 0 ? gross - EMPTY_BOX_GRAMS : 0;
-  return { grams: unopened * FULL_BOX_GRAMS + openNet, error: null };
+  return { grams: unopened * FULL_BOX_GRAMS + openNet, grossGrams: gross, error: null };
 }
 
 /** Rebuild the inputs from a saved row. Old rows (before boxes) can't be split, so they come back blank. */
