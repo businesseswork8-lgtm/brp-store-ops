@@ -118,7 +118,7 @@ function GeneralCount() {
           ? {
               quantity: boxNet({ name: item.name, tare_grams: item.tare_grams, full_box_grams: item.full_box_grams }, b).grams ?? 0,
               unopened_boxes: Number(b.unopened) || 0,
-              open_box_gross: boxNet({ name: item.name, tare_grams: item.tare_grams, full_box_grams: item.full_box_grams }, b).grossGrams ?? (Number(b.openGross) || 0),
+              open_box_gross: Number(b.openGross) || 0,
             }
           : { quantity: fromDisplay(Number(v), item.rista_unit, item.uom) }),
         kind: fullCount ? 'audit' : 'count',
@@ -158,7 +158,7 @@ function GeneralCount() {
         ? {
             quantity: boxNet({ name: i.name, tare_grams: i.tare_grams, full_box_grams: i.full_box_grams }, boxes[i.id]).grams ?? 0,
             unopened_boxes: Number(boxes[i.id].unopened) || 0,
-            open_box_gross: boxNet({ name: i.name, tare_grams: i.tare_grams, full_box_grams: i.full_box_grams }, boxes[i.id]).grossGrams ?? (Number(boxes[i.id].openGross) || 0),
+            open_box_gross: Number(boxes[i.id].openGross) || 0,
           }
         : { quantity: fromDisplay(Number(values[i.id]), i.rista_unit, i.uom) }),
       kind: fullCount ? 'audit' : 'count',
@@ -252,9 +252,9 @@ function GeneralCount() {
                             onWheel={e => e.currentTarget.blur()}
                             onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                             onBlur={() => autoSaveSingle(i, undefined, b)} />
-                          <input type="number" inputMode="decimal" min="0" step="any" className={styles.input}
-                            value={b.openGross} placeholder="Open box on scale (g or kg)" aria-label={`${i.name} open box weight`}
-                            onChange={e => set('openGross', e.target.value.replace(/[^0-9.]/g, ''))}
+                          <input type="number" inputMode="decimal" min="0" className={styles.input}
+                            value={b.openGross} placeholder="Open box on scale (g)" aria-label={`${i.name} open box weight`}
+                            onChange={e => set('openGross', e.target.value.replace(/[^0-9]/g, ''))}
                             onWheel={e => e.currentTarget.blur()}
                             onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                             onBlur={() => autoSaveSingle(i, undefined, b)} />

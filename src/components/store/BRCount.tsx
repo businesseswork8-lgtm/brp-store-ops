@@ -132,7 +132,7 @@ export function BRCount() {
         count_date: today,
         session,
         unopened_boxes: Number(b.unopened) || 0,
-        open_box_gross: r.grossGrams ?? (Number(b.openGross) || 0),
+        open_box_gross: Number(b.openGross) || 0,
         grams: r.grams ?? 0,
         staff_member_id: currentStaff,
         submitted_by_profile_id: user?.id,
@@ -180,7 +180,7 @@ export function BRCount() {
       rows.push({
         store_id: store.id, item_id: f.id, count_date: today, session,
         unopened_boxes: Number(cur[f.id].unopened) || 0,
-        open_box_gross: r.grossGrams ?? (Number(cur[f.id].openGross) || 0),
+        open_box_gross: Number(cur[f.id].openGross) || 0,
         grams: r.grams ?? 0,
         staff_member_id: staff,
       });
@@ -272,7 +272,7 @@ export function BRCount() {
           count_date: today,
           session: 'opening',
           unopened_boxes: Number(b.unopened) || 0,
-          open_box_gross: r.grossGrams ?? (Number(b.openGross) || 0),
+          open_box_gross: Number(b.openGross) || 0,
           grams: r.grams,
           staff_member_id: currentStaff,
           submitted_by_profile_id: user?.id,
@@ -430,10 +430,10 @@ export function BRCount() {
                           onBlur={() => autoSaveItem(f)} />
                       </label>
                       <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem', color: 'var(--text-secondary)', flex: 1 }}>
-                        Open box on scale (g or kg, with box)
-                        <input type="number" inputMode="decimal" min="0" step="any" className={styles.input}
-                          value={b.openGross} placeholder="e.g. 1450 or 1.45" aria-label={`${f.name} open box weight with box`}
-                          onChange={e => setEntry(f, 'openGross', e.target.value.replace(/[^0-9.]/g, ''))}
+                        Open box on scale (g, with box)
+                        <input type="number" inputMode="decimal" min="0" className={styles.input}
+                          value={b.openGross} placeholder="e.g. 1450" aria-label={`${f.name} open box weight with box`}
+                          onChange={e => setEntry(f, 'openGross', e.target.value.replace(/[^0-9]/g, ''))}
                           onWheel={e => e.currentTarget.blur()}
                           onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault(); }}
                           onBlur={() => autoSaveItem(f)} />
